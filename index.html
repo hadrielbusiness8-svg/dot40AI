@@ -1180,7 +1180,9 @@
     sendBtn.disabled = true;
     logoDot.classList.add('pulse');
 
-    if(wasImageMode){
+    if(!wasImageMode && isCreatorQuery(text)){
+      showCreatorReply(conv);
+    } else if(wasImageMode){
       await handleImageGeneration(text, conv);
     } else {
       await handleChat(text, attachmentsForRequest, conv);
@@ -1189,6 +1191,18 @@
     isSending = false;
     sendBtn.disabled = false;
     logoDot.classList.remove('pulse');
+  }
+
+  function isCreatorQuery(text){
+    const t = text.toLowerCase();
+    return /who (created|made|coded|built|is behind|is the creator|is the coder) (this|dot ?\.?40)|creator of this (app|website|ai)|coder of this (app|website|ai)/.test(t);
+  }
+
+  function showCreatorReply(conv){
+    conv.messages.push({ role:'assistant', content:'The coder of this AI is Hadriel Ajayi, from Abuja, Nigeria.' });
+    conv.updatedAt = Date.now();
+    persistConversations();
+    renderMessages();
   }
 
   function buildMemoryContext(excludeConvId){
