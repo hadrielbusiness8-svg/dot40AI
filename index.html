@@ -491,9 +491,27 @@
     </div>
 
     <div class="field">
+      <label>Your name</label>
+      <input type="text" id="userNameInput" placeholder="What should Dot.40 call you?">
+      <div class="desc">Dot.40 will address you by this in chat.</div>
+    </div>
+
+    <div class="field">
       <label>Focus</label>
       <textarea id="focusInput" placeholder="e.g. Focus on concise, practical coding help. Prefer bullet points. Push back if my logic seems off."></textarea>
       <div class="desc">This becomes Dot.40's system prompt — tell it what to prioritize, what tone to use, or what to avoid.</div>
+    </div>
+
+    <div class="field">
+      <label>Voice</label>
+      <select id="voiceSelect"></select>
+      <div class="desc">Used when you tap "Listen" on a reply. Available voices depend on your browser/device.</div>
+    </div>
+
+    <div class="field">
+      <label>Memory</label>
+      <div class="desc" style="margin-top:0;">Dot.40 remembers things you've said across past chats to give better answers.</div>
+      <button class="btn" id="clearMemoryBtn" style="margin-top:10px;">Clear memory</button>
     </div>
 
     <div class="field">
@@ -527,7 +545,7 @@
     { value:'gemini-3.1-flash-lite', name:'Gemini 3.1 Flash Lite', sub:'Fastest and lightest, simpler tasks' }
   ];
 
-  const defaults = { model: MODELS[0].value, focus: '', accent: '#5b5fff' };
+  const defaults = { model: MODELS[0].value, focus: '', accent: '#5b5fff', userName: '', voiceName: '', memoryClearedAt: 0 };
 
   let settings = loadSettings();
   let conversations = loadConversations();
@@ -563,6 +581,9 @@
   const settingsPanel = document.getElementById('settingsPanel');
   const modelOptionsEl = document.getElementById('modelOptions');
   const focusInput = document.getElementById('focusInput');
+  const userNameInput = document.getElementById('userNameInput');
+  const voiceSelect = document.getElementById('voiceSelect');
+  const clearMemoryBtn = document.getElementById('clearMemoryBtn');
   const swatchesEl = document.getElementById('swatches');
   const customColor = document.getElementById('customColor');
   const saveBtn = document.getElementById('saveBtn');
@@ -899,9 +920,11 @@
 
   function openSettingsPanel(){
     focusInput.value = settings.focus;
+    userNameInput.value = settings.userName;
     customColor.value = settings.accent;
     renderModelOptions();
     renderSwatches();
+    renderVoiceOptions();
     overlay.classList.add('open');
     settingsPanel.classList.add('open');
   }
@@ -921,8 +944,41 @@
     renderSwatches();
   });
 
+  function renderVoiceOptions(){
+    if(!('speechSynthesis' in window)){
+      voiceSelect.innerHTML = '<option value="">Not supported in this browser</option>';
+      voiceSelect.disabled = true;
+      return;
+    }
+    const voices = window.speechSynthesis.getVoices();
+    voiceSelect.innerHTML = '';
+    const defaultOpt = document.createElement('option');
+    defaultOpt.value = '';
+    defaultOpt.textContent = 'Default voice';
+    voiceSelect.appendChild(defaultOpt);
+    voices.forEach(v => {
+      const opt = document.createElement('option');
+      opt.value = v.name;
+      opt.textContent = v.name + ' (' + v.lang + ')';
+      if(v.name === settings.voiceName) opt.selected = true;
+      voiceSelect.appendChild(opt);
+    });
+  }
+  if('speechSynthesis' in window){
+    window.speechSynthesis.onvoiceschanged = renderVoiceOptions;
+  }
+
+  clearMemoryBtn.addEventListener('click', () => {
+    if(!confirm('Clear everything Dot.40 has remembered from past chats? This does not delete your chat history, just what it recalls from it.')) return;
+    settings.memoryClearedAt = Date.now();
+    persistSettings();
+    saveStatus.textContent = 'Memory cleared.';
+  });
+
   saveBtn.addEventListener('click', () => {
     settings.focus = focusInput.value.trim();
+    settings.userName = userNameInput.value.trim();
+    settings.voiceName = voiceSelect.value;
     persistSettings();
     modelBadge.textContent = settings.model;
     saveStatus.textContent = 'Saved.';
@@ -1135,12 +1191,40 @@
     logoDot.classList.remove('pulse');
   }
 
+  function buildMemoryContext(excludeConvId){
+    const relevant = conversations.filter(c =>
+      c.id !== excludeConvId && c.updatedAt > (settings.memoryClearedAt || 0)
+    );
+    if(!relevant.length) return '';
+
+    relevant.sort((a,b) => b.updatedAt - a.updatedAt);
+    let bits = [];
+    for(const c of relevant.slice(0, 25)){
+      c.messages.forEach(m => {
+        if(m.role === 'user' && m.content && m.content.trim()){
+          bits.push(m.content.trim());
+        }
+      });
+    }
+    const joined = bits.join(' | ');
+    return joined.slice(-4000); // keep the most recent slice, cap payload size
+  }
+
   async function handleChat(text, attachments, conv){
     const { placeholder } = addAssistantPlaceholder();
 
-    const systemPrompt = settings.focus
+    let systemPrompt = settings.focus
       ? `You are Dot.40, a helpful AI assistant. Focus in particular on: ${settings.focus}`
       : 'You are Dot.40, a helpful AI assistant.';
+
+    if(settings.userName){
+      systemPrompt += ` Address the user as "${settings.userName}".`;
+    }
+
+    const memory = buildMemoryContext(conv.id);
+    if(memory){
+      systemPrompt += `\n\nHere is context you've picked up from the user's past conversations with you — use it naturally to remember who they are and what they care about, but don't quote it back verbatim or mention that you're recalling it unless it's relevant: ${memory}`;
+    }
 
     let fullText = text;
     attachments.forEach(a => {
@@ -1243,7 +1327,20 @@
   let speakingBtn = null;
 
   function stripForSpeech(text){
-    return (text || '').replace(/```[\s\S]*?```/g, ' code block. ');
+    let t = (text || '').replace(/```[\s\S]*?```/g, ' code block. ');
+    t = t.replace(/`([^`]+)`/g, '$1');            // inline code
+    t = t.replace(/\*\*\*([^*]+)\*\*\*/g, '$1');   // bold+italic
+    t = t.replace(/\*\*([^*]+)\*\*/g, '$1');       // bold
+    t = t.replace(/\*([^*]+)\*/g, '$1');           // italic
+    t = t.replace(/~~([^~]+)~~/g, '$1');           // strikethrough
+    t = t.replace(/^#{1,6}\s+/gm, '');             // headers
+    t = t.replace(/^>\s?/gm, '');                  // blockquotes
+    t = t.replace(/^[-*+]\s+/gm, '');              // bullet markers
+    t = t.replace(/\[([^\]]+)\]\([^)]+\)/g, '$1'); // markdown links -> just the text
+    t = t.replace(/[*_~`#>]/g, '');                // any stray leftover symbols
+    t = t.replace(/\n{2,}/g, '. ');
+    t = t.replace(/[ \t]{2,}/g, ' ');
+    return t.trim();
   }
 
   function resetSpeakBtn(){
@@ -1268,6 +1365,10 @@
 
     const utter = new SpeechSynthesisUtterance(text);
     utter.rate = 1;
+    if(settings.voiceName){
+      const match = window.speechSynthesis.getVoices().find(v => v.name === settings.voiceName);
+      if(match) utter.voice = match;
+    }
     utter.onend = resetSpeakBtn;
     utter.onerror = resetSpeakBtn;
 
