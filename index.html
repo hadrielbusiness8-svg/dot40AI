@@ -3,9 +3,16 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<meta name="google-site-verification" content="gBrXsLVoTfVJvrsAi4YfP0tv9CQg8K4alr-MOTmQIOc" />
-<title>Dot.40</title>
-<link rel="icon" type="image/x-icon" href="dot40-icon.png">
+<title>Dot.40 AI — Personal AI Assistant</title>
+<meta name="description" content="Dot.40 AI is a personal AI chat assistant with chat, voice input, text-to-speech, image generation, and file support. Created by Hadriel Ajayi, Abuja, Nigeria.">
+<meta name="keywords" content="Dot.40, Dot.40 AI, Hadriel Ajayi, AI chat assistant, AI assistant Nigeria">
+<meta name="author" content="Hadriel Ajayi">
+<meta property="og:title" content="Dot.40 AI">
+<meta property="og:description" content="A personal AI chat assistant — chat, voice, images, and more.">
+<meta property="og:type" content="website">
+<!-- once your domain is live, set this to your real URL, e.g. https://dot40-ai.com -->
+<meta property="og:url" content="https://dot40-ai.com">
+<meta name="robots" content="index, follow">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
@@ -274,7 +281,8 @@
 
   .composer-inner{ width:100%; max-width:760px; }
 
-  .pending-attachments{ display:flex; flex-wrap:wrap; gap:6px; margin-bottom:8px; }
+  .pending-attachments{ display:flex; flex-wrap:wrap; gap:6px; }
+  .pending-attachments:not(:empty){ margin-bottom:8px; }
   .pending-chip{
     display:flex; align-items:center; gap:6px; padding:5px 8px 5px 6px;
     border:1px solid var(--border); border-radius:20px; background:var(--panel);
@@ -1274,7 +1282,8 @@
       });
       if(!res.ok){
         const errText = await res.text().catch(()=> '');
-        throw new Error('HTTP ' + res.status + (errText ? ' — ' + errText.slice(0,300) : ''));
+        console.error('Dot.40 chat error:', res.status, errText);
+        throw new Error(res.status === 429 ? 'busy' : 'failed');
       }
       const data = await res.json();
       const reply = data && data.choices && data.choices[0] && data.choices[0].message
@@ -1282,7 +1291,10 @@
       placeholder.content = reply;
       placeholder.thinking = false;
     }catch(err){
-      placeholder.content = 'Could not reach Gemini: ' + err.message + '. If this is running locally, make sure server.js is running (node server.js). If it\'s live on Render, check that GEMINI_API_KEY is set in the Render dashboard.';
+      console.error('Dot.40 chat error:', err);
+      placeholder.content = err.message === 'busy'
+        ? 'I\'m a little busy right now — give it a moment and try again.'
+        : 'Something went wrong sending that. Try again in a moment.';
       placeholder.error = true;
     }
     conv.updatedAt = Date.now();
@@ -1294,21 +1306,30 @@
     const { placeholder } = addAssistantPlaceholder();
     placeholder.content = 'Generating image...';
     try{
-      if(!prompt || !prompt.trim()) throw new Error('Type a description of the image first.');
+      if(!prompt || !prompt.trim()){
+        placeholder.content = 'Type a description of the image first.';
+        placeholder.error = true;
+        conv.updatedAt = Date.now();
+        persistConversations();
+        renderMessages();
+        return;
+      }
       const seed = Math.floor(Math.random() * 1000000);
       const qualityPrompt = prompt.trim() + ', highly detailed, sharp focus, professional quality, 4k';
       const url = 'https://image.pollinations.ai/prompt/' + encodeURIComponent(qualityPrompt) +
         '?width=1536&height=1536&nologo=true&model=flux&enhance=true&seed=' + seed;
       const res = await fetch(url);
       if(!res.ok){
-        throw new Error('HTTP ' + res.status);
+        console.error('Dot.40 image error:', res.status);
+        throw new Error('failed');
       }
       const blob = await res.blob();
       const dataUrl = await blobToDataUrl(blob);
       placeholder.image = dataUrl;
       placeholder.content = '';
     }catch(err){
-      placeholder.content = 'Could not generate image: ' + err.message + '. Pollinations.ai may be briefly busy — try again in a moment.';
+      console.error('Dot.40 image error:', err);
+      placeholder.content = 'Couldn\'t generate that image — try again in a moment.';
       placeholder.error = true;
     }
     conv.updatedAt = Date.now();
