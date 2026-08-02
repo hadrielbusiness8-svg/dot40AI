@@ -1386,6 +1386,34 @@
     speakingBtn = null;
   }
 
+  function detectSpeechLang(text){
+    if(/[\u4e00-\u9fff]/.test(text)) return 'zh-CN';
+    if(/[\u3040-\u30ff]/.test(text)) return 'ja-JP';
+    if(/[\uac00-\ud7af]/.test(text)) return 'ko-KR';
+    if(/[\u0600-\u06ff]/.test(text)) return 'ar-SA';
+    if(/[\u0400-\u04ff]/.test(text)) return 'ru-RU';
+    if(/[\u0370-\u03ff]/.test(text)) return 'el-GR';
+    if(/[\u0590-\u05ff]/.test(text)) return 'he-IL';
+    if(/[\u0900-\u097f]/.test(text)) return 'hi-IN';
+    if(/[\u0e00-\u0e7f]/.test(text)) return 'th-TH';
+
+    // Latin-script languages need word/accent hints, not just character ranges
+    const lower = text.toLowerCase();
+    const hits = (re) => (lower.match(re) || []).length;
+    const scores = {
+      'es-ES': hits(/\b(el|la|los|las|de|que|y|es|para|con|una)\b/g) + hits(/[ñáéíóúü¿¡]/g) * 2,
+      'fr-FR': hits(/\b(le|la|les|de|et|est|pour|avec|une|des|que)\b/g) + hits(/[àâçéèêëîïôùûüœ]/g) * 2,
+      'de-DE': hits(/\b(der|die|das|und|ist|für|mit|eine|nicht|ich)\b/g) + hits(/[äöüß]/g) * 2,
+      'pt-PT': hits(/\b(o|a|os|as|de|que|e|é|para|com|uma|não)\b/g) + hits(/[ãõ]/g) * 2,
+      'it-IT': hits(/\b(il|la|di|che|e|è|per|con|una|non|sono)\b/g)
+    };
+    let best = 'en-US', bestScore = 1; // require at least 2 hits to override English default
+    for(const [lang, score] of Object.entries(scores)){
+      if(score > bestScore){ bestScore = score; best = lang; }
+    }
+    return best;
+  }
+
   function toggleSpeak(m, btn){
     if(!('speechSynthesis' in window)){
       alert('Text-to-speech isn\'t supported in this browser.');
@@ -1400,12 +1428,24 @@
     const text = stripForSpeech(m.content);
     if(!text.trim()) return;
 
+    const detectedLang = detectSpeechLang(text);
+    const langPrefix = detectedLang.split('-')[0];
+    const voices = window.speechSynthesis.getVoices();
+
     const utter = new SpeechSynthesisUtterance(text);
     utter.rate = 1;
+    utter.lang = detectedLang;
+
+    let chosenVoice = null;
     if(settings.voiceName){
-      const match = window.speechSynthesis.getVoices().find(v => v.name === settings.voiceName);
-      if(match) utter.voice = match;
+      const manual = voices.find(v => v.name === settings.voiceName);
+      if(manual && manual.lang.toLowerCase().startsWith(langPrefix)) chosenVoice = manual;
     }
+    if(!chosenVoice){
+      chosenVoice = voices.find(v => v.lang.toLowerCase().startsWith(langPrefix));
+    }
+    if(chosenVoice) utter.voice = chosenVoice;
+
     utter.onend = resetSpeakBtn;
     utter.onerror = resetSpeakBtn;
 
