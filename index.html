@@ -257,7 +257,7 @@
     transform:translate(-50%,-50%) scale(0.85);
     background:radial-gradient(circle at 32% 30%, #ffffff 0%, var(--accent) 32%, color-mix(in srgb, var(--accent) 55%, #000) 68%, #05050a 100%);
     box-shadow:0 0 90px color-mix(in srgb, var(--accent) 65%, transparent), 0 0 160px color-mix(in srgb, var(--accent) 30%, transparent);
-    opacity:0; pointer-events:none; z-index:35;
+    opacity:0; pointer-events:none; z-index:51;
     transition:opacity 0.35s ease, transform 0.35s ease;
   }
   .voice-orb.active{
@@ -269,12 +269,33 @@
     50%{ transform:translate(-50%,-50%) scale(1.08); filter:brightness(1.12); }
   }
 
+  .voice-mode-overlay{
+    position:fixed; inset:0; background:rgba(6,7,10,0.92); z-index:50;
+    display:flex; flex-direction:column; align-items:center; justify-content:center;
+    opacity:0; pointer-events:none; transition:opacity 0.3s ease;
+  }
+  .voice-mode-overlay.open{ opacity:1; pointer-events:auto; }
+  .voice-mode-status{
+    position:absolute; bottom:14%; font-family:var(--font-mono); font-size:13px;
+    color:var(--text-muted); letter-spacing:0.02em;
+  }
+  .voice-mode-close{
+    position:absolute; top:24px; right:24px; width:42px; height:42px; border-radius:50%;
+    border:1px solid var(--border); background:var(--panel); color:var(--text-muted);
+    display:flex; align-items:center; justify-content:center; cursor:pointer;
+  }
+  .voice-mode-close:hover{ color:var(--text); }
+  .voice-mode-close svg{ width:18px; height:18px; }
+
   .msg-attachments{ display:flex; flex-wrap:wrap; gap:6px; }
   .attach-chip{
     display:flex; align-items:center; gap:6px; padding:5px 9px;
     border:1px solid var(--border); border-radius:20px; background:var(--panel-2);
     font-size:11.5px; color:var(--text-muted); font-family:var(--font-mono);
+    text-decoration:none; max-width:280px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
   }
+  a.attach-chip{ cursor:pointer; transition:border-color 0.15s ease, color 0.15s ease; }
+  a.attach-chip:hover{ color:var(--accent); border-color:color-mix(in srgb, var(--accent) 50%, var(--border)); }
   .attach-chip img{ width:16px; height:16px; border-radius:4px; object-fit:cover; }
 
   .gen-image{ max-width:100%; border-radius:12px; border:1px solid var(--border); display:block; }
@@ -449,6 +470,9 @@
       </div>
     </div>
     <div class="header-actions">
+      <button class="icon-btn" id="voiceModeBtn" title="Start a hands-free voice conversation">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z"/><path d="M19 10v2a7 7 0 01-14 0v-2M12 19v4M8 23h8" stroke-linecap="round" stroke-linejoin="round"/><circle cx="12" cy="8" r="10" opacity="0"/></svg>
+      </button>
       <button class="icon-btn" id="exportPdfBtn" title="Export conversation as PDF">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" stroke-linecap="round" stroke-linejoin="round"/><path d="M14 2v6h6" stroke-linecap="round" stroke-linejoin="round"/></svg>
       </button>
@@ -478,6 +502,9 @@
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z"/><path d="M19 10v2a7 7 0 01-14 0v-2M12 19v4M8 23h8" stroke-linecap="round" stroke-linejoin="round"/></svg>
         </button>
         <textarea id="input" placeholder="Message Dot.40..." rows="1"></textarea>
+        <button class="composer-btn" id="searchModeBtn" title="Search the web for this instead of just chatting">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3" stroke-linecap="round"/></svg>
+        </button>
         <button class="composer-btn" id="imageModeBtn" title="Generate an image instead of chatting">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21" stroke-linecap="round" stroke-linejoin="round"/></svg>
         </button>
@@ -491,6 +518,13 @@
 </div>
 
 <div class="voice-orb" id="voiceOrb"></div>
+
+<div class="voice-mode-overlay" id="voiceModeOverlay">
+  <button class="voice-mode-close" id="voiceModeClose">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M6 6l12 12M18 6L6 18" stroke-linecap="round"/></svg>
+  </button>
+  <div class="voice-mode-status" id="voiceModeStatus">Listening...</div>
+</div>
 
 <div class="overlay" id="previewOverlay"></div>
 <div class="preview-modal" id="previewModal">
@@ -582,6 +616,7 @@
   let pendingAttachments = []; // {type:'image'|'pdf'|'text', name, dataUrl?, extractedText?, mime}
   let isSending = false;
   let imageMode = false;
+  let searchMode = false;
 
   // ---------- Elements ----------
   const sidebar = document.getElementById('sidebar');
@@ -596,12 +631,17 @@
   const logoDot = document.getElementById('logoDot');
   const modelBadge = document.getElementById('modelBadge');
   const exportPdfBtn = document.getElementById('exportPdfBtn');
+  const voiceModeBtn = document.getElementById('voiceModeBtn');
+  const voiceModeOverlay = document.getElementById('voiceModeOverlay');
+  const voiceModeClose = document.getElementById('voiceModeClose');
+  const voiceModeStatus = document.getElementById('voiceModeStatus');
 
   const attachBtn = document.getElementById('attachBtn');
   const fileInput = document.getElementById('fileInput');
   const micBtn = document.getElementById('micBtn');
   const pendingAttachmentsEl = document.getElementById('pendingAttachments');
   const imageModeBtn = document.getElementById('imageModeBtn');
+  const searchModeBtn = document.getElementById('searchModeBtn');
   const hint = document.getElementById('hint');
 
   const settingsBtn = document.getElementById('settingsBtn');
@@ -760,6 +800,21 @@
         renderMessageContent(bubble, m.content);
       }
       col.appendChild(bubble);
+    }
+
+    if(m.searchLinks && m.searchLinks.length){
+      const linksWrap = document.createElement('div');
+      linksWrap.className = 'msg-attachments';
+      m.searchLinks.forEach(l => {
+        const a = document.createElement('a');
+        a.className = 'attach-chip';
+        a.href = l.url;
+        a.target = '_blank';
+        a.rel = 'noopener noreferrer';
+        a.textContent = '🔗 ' + l.title;
+        linksWrap.appendChild(a);
+      });
+      col.appendChild(linksWrap);
     }
 
     if(m.role === 'assistant' && (m.content || m.image)){
@@ -1052,7 +1107,8 @@
     recognition = new SpeechRecognitionAPI();
     recognition.continuous = false;
     recognition.interimResults = true;
-    recognition.lang = 'en-US';
+    recognition.maxAlternatives = 1;
+    recognition.lang = navigator.language || 'en-US';
 
     recognition.onstart = () => {
       isListening = true;
@@ -1090,6 +1146,146 @@
 
     recognition.start();
   });
+
+  // ---------- Voice Mode (hands-free conversation) ----------
+  let voiceModeActive = false;
+  let voiceModeRecognition = null;
+
+  function startVoiceMode(){
+    if(!SpeechRecognitionAPI){
+      alert('Voice input isn\'t supported in this browser. Try Chrome or Edge.');
+      return;
+    }
+    if(!('speechSynthesis' in window)){
+      alert('Text-to-speech isn\'t supported in this browser.');
+      return;
+    }
+    if('speechSynthesis' in window) window.speechSynthesis.cancel();
+    voiceModeActive = true;
+    voiceModeOverlay.classList.add('open');
+    voiceModeListenLoop();
+  }
+
+  function stopVoiceMode(){
+    voiceModeActive = false;
+    if(voiceModeRecognition){ try{ voiceModeRecognition.stop(); }catch(e){} }
+    if('speechSynthesis' in window) window.speechSynthesis.cancel();
+    hideOrb();
+    voiceModeOverlay.classList.remove('open');
+    renderChatList();
+    renderMessages();
+  }
+
+  function voiceModeListenLoop(){
+    if(!voiceModeActive) return;
+    voiceModeStatus.textContent = 'Listening...';
+    showOrb();
+
+    voiceModeRecognition = new SpeechRecognitionAPI();
+    voiceModeRecognition.continuous = true;
+    voiceModeRecognition.interimResults = true;
+    voiceModeRecognition.lang = navigator.language || 'en-US';
+    let finalTranscript = '';
+
+    voiceModeRecognition.onresult = (e) => {
+      for(let i = e.resultIndex; i < e.results.length; i++){
+        if(e.results[i].isFinal) finalTranscript += e.results[i][0].transcript + ' ';
+      }
+    };
+    voiceModeRecognition.onspeechend = () => {
+      try{ voiceModeRecognition.stop(); }catch(err){}
+    };
+    voiceModeRecognition.onerror = () => {
+      if(voiceModeActive) setTimeout(voiceModeListenLoop, 500);
+    };
+    voiceModeRecognition.onend = async () => {
+      if(!voiceModeActive) return;
+      const text = finalTranscript.trim();
+      if(!text){ voiceModeListenLoop(); return; }
+      voiceModeStatus.textContent = 'Thinking...';
+      await voiceModeRespond(text);
+      if(voiceModeActive) voiceModeListenLoop();
+    };
+
+    voiceModeRecognition.start();
+  }
+
+  async function voiceModeRespond(text){
+    if(!getCurrentConv()) createConversation();
+    const conv = getCurrentConv();
+    conv.messages.push({ role:'user', content:text });
+    if(conv.messages.filter(m => m.role==='user').length === 1){
+      conv.title = titleFromFirstMessage(text);
+    }
+    conv.updatedAt = Date.now();
+    persistConversations();
+
+    let systemPrompt = settings.focus
+      ? `You are Dot.40, a helpful AI assistant having a spoken voice conversation. Keep answers natural, direct, and reasonably concise since they'll be read aloud. Focus in particular on: ${settings.focus}`
+      : 'You are Dot.40, a helpful AI assistant having a spoken voice conversation. Keep answers natural, direct, and reasonably concise since they will be read aloud.';
+    if(settings.userName) systemPrompt += ` Address the user as "${settings.userName}".`;
+    const memory = buildMemoryContext(conv.id);
+    if(memory) systemPrompt += `\n\nContext from the user's past conversations: ${memory}`;
+
+    const historyForApi = conv.messages.map(m => ({ role: m.role, content: m.content || '' }));
+
+    let reply = 'Sorry, I couldn\'t reach the AI just now.';
+    try{
+      const res = await fetch(PROXY_URL + '/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ model: settings.model, messages: [{ role:'system', content: systemPrompt }, ...historyForApi] })
+      });
+      if(res.ok){
+        const data = await res.json();
+        reply = data && data.choices && data.choices[0] && data.choices[0].message
+          ? data.choices[0].message.content : reply;
+      } else {
+        console.error('Dot.40 voice mode error:', res.status);
+      }
+    }catch(err){
+      console.error('Dot.40 voice mode error:', err);
+    }
+
+    conv.messages.push({ role:'assistant', content: reply });
+    conv.updatedAt = Date.now();
+    persistConversations();
+
+    voiceModeStatus.textContent = 'Speaking...';
+    await speakForVoiceMode(reply);
+  }
+
+  function speakForVoiceMode(text){
+    return new Promise(resolve => {
+      window.speechSynthesis.cancel();
+      const clean = stripForSpeech(text);
+      if(!clean.trim()){ resolve(); return; }
+
+      const detectedLang = detectSpeechLang(clean);
+      const langPrefix = detectedLang.split('-')[0];
+      const voices = window.speechSynthesis.getVoices();
+
+      const utter = new SpeechSynthesisUtterance(clean);
+      utter.rate = 1;
+      utter.lang = detectedLang;
+
+      let chosenVoice = null;
+      if(settings.voiceName){
+        const manual = voices.find(v => v.name === settings.voiceName);
+        if(manual && manual.lang.toLowerCase().startsWith(langPrefix)) chosenVoice = manual;
+      }
+      if(!chosenVoice) chosenVoice = voices.find(v => v.lang.toLowerCase().startsWith(langPrefix));
+      if(chosenVoice) utter.voice = chosenVoice;
+
+      utter.onend = resolve;
+      utter.onerror = resolve;
+      showOrb();
+      window.speechSynthesis.speak(utter);
+    });
+  }
+
+  voiceModeBtn.addEventListener('click', startVoiceMode);
+  voiceModeClose.addEventListener('click', stopVoiceMode);
 
   // ---------- Attachments ----------
   attachBtn.addEventListener('click', () => fileInput.click());
@@ -1170,12 +1366,26 @@
   // ---------- Image mode toggle ----------
   imageModeBtn.addEventListener('click', () => {
     imageMode = !imageMode;
+    if(imageMode){ searchMode = false; searchModeBtn.classList.remove('active'); }
     imageModeBtn.classList.toggle('active', imageMode);
-    hint.textContent = imageMode
-      ? 'Image mode on — your next message generates a picture instead of a reply.'
-      : 'Image mode off — click the picture icon to generate images instead of chatting.';
+    updateHint();
     input.placeholder = imageMode ? 'Describe the image to generate...' : 'Message Dot.40...';
   });
+
+  // ---------- Search mode toggle ----------
+  searchModeBtn.addEventListener('click', () => {
+    searchMode = !searchMode;
+    if(searchMode){ imageMode = false; imageModeBtn.classList.remove('active'); }
+    searchModeBtn.classList.toggle('active', searchMode);
+    updateHint();
+    input.placeholder = searchMode ? 'What do you want to search for?' : 'Message Dot.40...';
+  });
+
+  function updateHint(){
+    if(imageMode) hint.textContent = 'Image mode on — your next message generates a picture instead of a reply.';
+    else if(searchMode) hint.textContent = 'Search mode on — your next message searches the web for links and an answer.';
+    else hint.textContent = 'Image mode off — click the picture icon to generate images instead of chatting.';
+  }
 
   // ---------- Sending ----------
   function addAssistantPlaceholder(){
@@ -1208,6 +1418,7 @@
     renderChatList();
 
     const wasImageMode = imageMode;
+    const wasSearchMode = searchMode;
     const attachmentsForRequest = pendingAttachments.slice();
     input.value = '';
     pendingAttachments = [];
@@ -1218,10 +1429,12 @@
     sendBtn.disabled = true;
     logoDot.classList.add('pulse');
 
-    if(!wasImageMode && isCreatorQuery(text)){
+    if(!wasImageMode && !wasSearchMode && isCreatorQuery(text)){
       showCreatorReply(conv);
     } else if(wasImageMode){
       await handleImageGeneration(text, conv);
+    } else if(wasSearchMode){
+      await handleWebSearch(text, conv);
     } else {
       await handleChat(text, attachmentsForRequest, conv);
     }
@@ -1325,6 +1538,64 @@
       placeholder.content = err.message === 'busy'
         ? 'I\'m a little busy right now — give it a moment and try again.'
         : 'Something went wrong sending that. Try again in a moment.';
+      placeholder.error = true;
+    }
+    conv.updatedAt = Date.now();
+    persistConversations();
+    renderMessages();
+  }
+
+  async function handleWebSearch(query, conv){
+    const { placeholder } = addAssistantPlaceholder();
+    placeholder.content = 'Searching the web...';
+    try{
+      const res = await fetch('/search?q=' + encodeURIComponent(query));
+      if(!res.ok) throw new Error('failed');
+      const data = await res.json();
+
+      const links = [];
+      if(data.AbstractURL) links.push({ title: data.Heading || query, url: data.AbstractURL });
+      (data.RelatedTopics || []).forEach(t => {
+        if(t.FirstURL && t.Text) links.push({ title: t.Text.split(' - ')[0].slice(0,90), url: t.FirstURL });
+        else if(t.Topics){
+          t.Topics.forEach(t2 => {
+            if(t2.FirstURL && t2.Text) links.push({ title: t2.Text.split(' - ')[0].slice(0,90), url: t2.FirstURL });
+          });
+        }
+      });
+      const topLinks = links.slice(0, 6);
+
+      let contextBits = [];
+      if(data.AbstractText) contextBits.push(data.AbstractText);
+      topLinks.forEach(l => contextBits.push(l.title));
+      const searchContext = contextBits.join(' | ').slice(0, 3000);
+
+      const systemPrompt = 'You are Dot.40, a helpful AI assistant with web search results available. ' +
+        'Answer the user\'s question using the search context below where relevant, and mention that this is based on a web search. ' +
+        'If the context doesn\'t actually answer the question, say so honestly rather than guessing.' +
+        (searchContext ? `\n\nWeb search context for "${query}": ${searchContext}` : '\n\n(No useful search context was found for this query.)');
+
+      const chatRes = await fetch(PROXY_URL + '/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: settings.model,
+          messages: [{ role:'system', content: systemPrompt }, { role:'user', content: query }]
+        })
+      });
+      if(!chatRes.ok){
+        console.error('Dot.40 search-chat error:', chatRes.status);
+        throw new Error('failed');
+      }
+      const chatData = await chatRes.json();
+      const reply = chatData && chatData.choices && chatData.choices[0] && chatData.choices[0].message
+        ? chatData.choices[0].message.content : 'I searched but couldn\'t put together an answer — try rephrasing.';
+
+      placeholder.content = reply;
+      placeholder.searchLinks = topLinks;
+    }catch(err){
+      console.error('Dot.40 search error:', err);
+      placeholder.content = 'Couldn\'t complete that search — try again in a moment.';
       placeholder.error = true;
     }
     conv.updatedAt = Date.now();
