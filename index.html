@@ -1186,21 +1186,54 @@
     voiceModeRecognition.interimResults = true;
     voiceModeRecognition.lang = navigator.language || 'en-US';
     let finalTranscript = '';
+    let interimTranscript = '';
+    let silenceTimer = null;
+
+    function scheduleStop(delay){
+      if(silenceTimer) clearTimeout(silenceTimer);
+      silenceTimer = setTimeout(() => {
+        try{ voiceModeRecognition.stop(); }catch(err){}
+      }, delay);
+    }
+
+    // if nothing is heard at all, don't hang forever — give up and listen again
+    scheduleStop(12000);
 
     voiceModeRecognition.onresult = (e) => {
+      interimTranscript = '';
       for(let i = e.resultIndex; i < e.results.length; i++){
         if(e.results[i].isFinal) finalTranscript += e.results[i][0].transcript + ' ';
+        else interimTranscript += e.results[i][0].transcript;
       }
+      // every time speech comes in, push the stop-timer out — finalize ~1.3s after they pause
+      scheduleStop(1300);
     };
     voiceModeRecognition.onspeechend = () => {
-      try{ voiceModeRecognition.stop(); }catch(err){}
+      scheduleStop(300);
     };
-    voiceModeRecognition.onerror = () => {
+    voiceModeRecognition.onerror = (e) => {
+      if(silenceTimer) clearTimeout(silenceTimer);
+      console.error('Dot.40 voice mode recognition error:', e.error);
+      if(e.error === 'not-allowed' || e.error === 'service-not-allowed'){
+        voiceModeStatus.textContent = 'Microphone access is blocked. Allow it in your browser\'s site settings, then try again.';
+        voiceModeActive = false;
+        hideOrb();
+        return;
+      }
+      if(e.error === 'audio-capture'){
+        voiceModeStatus.textContent = 'No microphone was found on this device.';
+        voiceModeActive = false;
+        hideOrb();
+        return;
+      }
       if(voiceModeActive) setTimeout(voiceModeListenLoop, 500);
     };
     voiceModeRecognition.onend = async () => {
+      if(silenceTimer) clearTimeout(silenceTimer);
       if(!voiceModeActive) return;
-      const text = finalTranscript.trim();
+      // prefer the finalized transcript, but fall back to whatever was still "interim"
+      // when we force-stopped — the browser doesn't always finalize in time
+      const text = (finalTranscript.trim() || interimTranscript.trim());
       if(!text){ voiceModeListenLoop(); return; }
       voiceModeStatus.textContent = 'Thinking...';
       await voiceModeRespond(text);
