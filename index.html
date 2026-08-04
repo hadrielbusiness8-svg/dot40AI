@@ -252,6 +252,23 @@
   }
   .preview-modal iframe{ flex:1; width:100%; border:none; background:#fff; }
 
+  .voice-orb{
+    position:fixed; top:50%; left:50%; width:200px; height:200px; border-radius:50%;
+    transform:translate(-50%,-50%) scale(0.85);
+    background:radial-gradient(circle at 32% 30%, #ffffff 0%, var(--accent) 32%, color-mix(in srgb, var(--accent) 55%, #000) 68%, #05050a 100%);
+    box-shadow:0 0 90px color-mix(in srgb, var(--accent) 65%, transparent), 0 0 160px color-mix(in srgb, var(--accent) 30%, transparent);
+    opacity:0; pointer-events:none; z-index:35;
+    transition:opacity 0.35s ease, transform 0.35s ease;
+  }
+  .voice-orb.active{
+    opacity:1; transform:translate(-50%,-50%) scale(1);
+    animation:orbPulse 2.6s ease-in-out infinite;
+  }
+  @keyframes orbPulse{
+    0%,100%{ transform:translate(-50%,-50%) scale(1); filter:brightness(1); }
+    50%{ transform:translate(-50%,-50%) scale(1.08); filter:brightness(1.12); }
+  }
+
   .msg-attachments{ display:flex; flex-wrap:wrap; gap:6px; }
   .attach-chip{
     display:flex; align-items:center; gap:6px; padding:5px 9px;
@@ -473,6 +490,8 @@
   </div>
 </div>
 
+<div class="voice-orb" id="voiceOrb"></div>
+
 <div class="overlay" id="previewOverlay"></div>
 <div class="preview-modal" id="previewModal">
   <div class="preview-head">
@@ -626,6 +645,7 @@
 
   function createConversation(){
     if('speechSynthesis' in window) window.speechSynthesis.cancel();
+    if(typeof hideOrb === 'function') hideOrb();
     const conv = { id: 'c_' + Date.now(), title: 'New chat', messages: [], updatedAt: Date.now() };
     conversations.unshift(conv);
     currentId = conv.id;
@@ -636,6 +656,7 @@
 
   function selectConversation(id){
     if('speechSynthesis' in window) window.speechSynthesis.cancel();
+    if(typeof hideOrb === 'function') hideOrb();
     currentId = id;
     renderChatList();
     renderMessages();
@@ -1010,8 +1031,12 @@
 
   // ---------- Voice input (mic) ----------
   const SpeechRecognitionAPI = window.SpeechRecognition || window.webkitSpeechRecognition;
+  const voiceOrb = document.getElementById('voiceOrb');
   let recognition = null;
   let isListening = false;
+
+  function showOrb(){ voiceOrb.classList.add('active'); }
+  function hideOrb(){ voiceOrb.classList.remove('active'); }
 
   micBtn.addEventListener('click', () => {
     if(!SpeechRecognitionAPI){
@@ -1033,6 +1058,7 @@
       isListening = true;
       micBtn.classList.add('listening');
       hint.textContent = 'Listening... speak now.';
+      showOrb();
     };
 
     recognition.onresult = (e) => {
@@ -1047,6 +1073,7 @@
     recognition.onerror = () => {
       isListening = false;
       micBtn.classList.remove('listening');
+      hideOrb();
       hint.textContent = imageMode
         ? 'Image mode on — your next message generates a picture instead of a reply.'
         : 'Image mode off — click the picture icon to generate images instead of chatting.';
@@ -1055,6 +1082,7 @@
     recognition.onend = () => {
       isListening = false;
       micBtn.classList.remove('listening');
+      hideOrb();
       hint.textContent = imageMode
         ? 'Image mode on — your next message generates a picture instead of a reply.'
         : 'Image mode off — click the picture icon to generate images instead of chatting.';
@@ -1241,6 +1269,8 @@
       ? `You are Dot.40, a helpful AI assistant. Focus in particular on: ${settings.focus}`
       : 'You are Dot.40, a helpful AI assistant.';
 
+    systemPrompt += ' When writing code: write complete, correct, production-quality code, not partial snippets or pseudocode. Follow best practices for the language, use clear naming, handle edge cases and errors, and add concise comments where they genuinely help. Prefer working code over lengthy explanation, but briefly explain non-obvious decisions. Always use fenced code blocks with the correct language tag.';
+
     if(settings.userName){
       systemPrompt += ` Address the user as "${settings.userName}".`;
     }
@@ -1384,6 +1414,7 @@
     if(speakingBtn) speakingBtn.innerHTML = SPEAK_ICON + ' Listen';
     speakingMsg = null;
     speakingBtn = null;
+    hideOrb();
   }
 
   function detectSpeechLang(text){
@@ -1452,6 +1483,7 @@
     speakingMsg = m;
     speakingBtn = btn;
     btn.innerHTML = STOP_ICON + ' Stop';
+    showOrb();
     window.speechSynthesis.speak(utter);
   }
 
