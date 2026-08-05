@@ -581,6 +581,13 @@
     </div>
 
     <div class="field">
+      <label>Password</label>
+      <input type="password" id="newPasswordInput" placeholder="Set a new sign-in password">
+      <button class="btn" id="changePasswordBtn" style="margin-top:10px;">Update password</button>
+      <div class="desc" id="passwordStatus"></div>
+    </div>
+
+    <div class="field">
       <label>Accent color</label>
       <div class="swatches" id="swatches"></div>
       <div class="custom-color-row">
@@ -1062,6 +1069,38 @@
     settings.memoryClearedAt = Date.now();
     persistSettings();
     saveStatus.textContent = 'Memory cleared.';
+  });
+
+  const newPasswordInput = document.getElementById('newPasswordInput');
+  const changePasswordBtn = document.getElementById('changePasswordBtn');
+  const passwordStatus = document.getElementById('passwordStatus');
+
+  changePasswordBtn.addEventListener('click', async () => {
+    const newPassword = newPasswordInput.value.trim();
+    if(newPassword.length < 4){
+      passwordStatus.textContent = 'Password must be at least 4 characters.';
+      passwordStatus.style.color = '#ffb3b3';
+      return;
+    }
+    try{
+      const res = await fetch('/change-password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ newPassword })
+      });
+      if(res.ok){
+        passwordStatus.textContent = 'Password updated. Everyone else will need the new one to sign in.';
+        passwordStatus.style.color = '';
+        newPasswordInput.value = '';
+      } else {
+        const data = await res.json().catch(() => ({}));
+        passwordStatus.textContent = data.error || 'Could not update password.';
+        passwordStatus.style.color = '#ffb3b3';
+      }
+    }catch(err){
+      passwordStatus.textContent = 'Could not reach the server to update the password.';
+      passwordStatus.style.color = '#ffb3b3';
+    }
   });
 
   saveBtn.addEventListener('click', () => {
