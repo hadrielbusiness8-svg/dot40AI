@@ -479,9 +479,6 @@
       <button class="icon-btn" id="settingsBtn" title="Settings">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 15a3 3 0 100-6 3 3 0 000 6z" stroke-linecap="round" stroke-linejoin="round"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 11-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 11-2.83-2.83l.06-.06A1.65 1.65 0 005 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 112.83-2.83l.06.06A1.65 1.65 0 009 4.6a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 112.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z" stroke-linecap="round" stroke-linejoin="round"/></svg>
       </button>
-      <a class="icon-btn" href="/logout" title="Sign out" style="text-decoration:none;">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4" stroke-linecap="round" stroke-linejoin="round"/><path d="M16 17l5-5-5-5M21 12H9" stroke-linecap="round" stroke-linejoin="round"/></svg>
-      </a>
     </div>
   </header>
 
@@ -578,13 +575,6 @@
       <label>Memory</label>
       <div class="desc" style="margin-top:0;">Dot.40 remembers things you've said across past chats to give better answers.</div>
       <button class="btn" id="clearMemoryBtn" style="margin-top:10px;">Clear memory</button>
-    </div>
-
-    <div class="field">
-      <label>Password</label>
-      <input type="password" id="newPasswordInput" placeholder="Set a new sign-in password">
-      <button class="btn" id="changePasswordBtn" style="margin-top:10px;">Update password</button>
-      <div class="desc" id="passwordStatus"></div>
     </div>
 
     <div class="field">
@@ -1069,38 +1059,6 @@
     settings.memoryClearedAt = Date.now();
     persistSettings();
     saveStatus.textContent = 'Memory cleared.';
-  });
-
-  const newPasswordInput = document.getElementById('newPasswordInput');
-  const changePasswordBtn = document.getElementById('changePasswordBtn');
-  const passwordStatus = document.getElementById('passwordStatus');
-
-  changePasswordBtn.addEventListener('click', async () => {
-    const newPassword = newPasswordInput.value.trim();
-    if(newPassword.length < 4){
-      passwordStatus.textContent = 'Password must be at least 4 characters.';
-      passwordStatus.style.color = '#ffb3b3';
-      return;
-    }
-    try{
-      const res = await fetch('/change-password', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ newPassword })
-      });
-      if(res.ok){
-        passwordStatus.textContent = 'Password updated. Everyone else will need the new one to sign in.';
-        passwordStatus.style.color = '';
-        newPasswordInput.value = '';
-      } else {
-        const data = await res.json().catch(() => ({}));
-        passwordStatus.textContent = data.error || 'Could not update password.';
-        passwordStatus.style.color = '#ffb3b3';
-      }
-    }catch(err){
-      passwordStatus.textContent = 'Could not reach the server to update the password.';
-      passwordStatus.style.color = '#ffb3b3';
-    }
   });
 
   saveBtn.addEventListener('click', () => {
