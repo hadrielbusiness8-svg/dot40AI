@@ -550,7 +550,7 @@
     <div class="field">
       <label>Model</label>
       <div class="model-options" id="modelOptions"></div>
-      <div class="desc">Image generation uses Pollinations.ai automatically — free, no setup needed.</div>
+      <div class="desc">Image generation uses Gemini's Nano Banana model — free tier, ~500 images/day.</div>
     </div>
 
     <div class="field">
@@ -1648,22 +1648,31 @@
         renderMessages();
         return;
       }
-      const seed = Math.floor(Math.random() * 1000000);
-      const qualityPrompt = prompt.trim() + ', highly detailed, sharp focus, professional quality, 4k';
-      const url = 'https://image.pollinations.ai/prompt/' + encodeURIComponent(qualityPrompt) +
-        '?width=1536&height=1536&nologo=true&model=flux&enhance=true&seed=' + seed;
-      const res = await fetch(url);
+      const res = await fetch(PROXY_URL + '/image', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt: prompt.trim() })
+      });
       if(!res.ok){
-        console.error('Dot.40 image error:', res.status);
-        throw new Error('failed');
+        const errText = await res.text().catch(() => '');
+        console.error('Dot.40 image error:', res.status, errText);
+        throw new Error(res.status === 429 ? 'busy' : 'failed');
       }
-      const blob = await res.blob();
-      const dataUrl = await blobToDataUrl(blob);
-      placeholder.image = dataUrl;
-      placeholder.content = '';
+      const data = await res.json();
+      const parts = data && data.candidates && data.candidates[0] && data.candidates[0].content && data.candidates[0].content.parts;
+      const imgPart = parts && parts.find(p => p.inlineData);
+      if(imgPart){
+        placeholder.image = 'data:' + imgPart.inlineData.mimeType + ';base64,' + imgPart.inlineData.data;
+        placeholder.content = '';
+      } else {
+        placeholder.content = 'No image came back — try describing it a little differently.';
+        placeholder.error = true;
+      }
     }catch(err){
       console.error('Dot.40 image error:', err);
-      placeholder.content = 'Couldn\'t generate that image — try again in a moment.';
+      placeholder.content = err.message === 'busy'
+        ? 'Hit the free daily image limit — try again a bit later.'
+        : 'Couldn\'t generate that image — try again in a moment.';
       placeholder.error = true;
     }
     conv.updatedAt = Date.now();
