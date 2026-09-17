@@ -141,6 +141,59 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  // ---- Image generation (Gemini's Nano Banana model) ----
+  if (req.method === 'POST' && req.url === '/image') {
+    const apiKey = getApiKey();
+    if (!apiKey) {
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({
+        error: 'No Gemini API key set. Locally: create apikey.txt with your key. On Render: set GEMINI_API_KEY in the dashboard.'
+      }));
+      return;
+    }
+
+    const raw = await readBody(req);
+    let payload;
+    try { payload = JSON.parse(raw); } catch (e) {
+      res.writeHead(400, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Bad request body' }));
+      return;
+    }
+
+    const genPayload = {
+      contents: [{ parts: [{ text: payload.prompt || '' }] }],
+      generationConfig: { responseModalities: ['IMAGE', 'TEXT'] }
+    };
+    const body = JSON.stringify(genPayload);
+    const forwardReq = https.request(
+      {
+        hostname: 'generativelanguage.googleapis.com',
+        path: '/v1beta/models/gemini-2.5-flash-image:generateContent',
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-goog-api-key': apiKey,
+          'Content-Length': Buffer.byteLength(body)
+        }
+      },
+      upstreamRes => {
+        let data = '';
+        upstreamRes.on('data', chunk => { data += chunk; });
+        upstreamRes.on('end', () => {
+          res.writeHead(upstreamRes.statusCode, { 'Content-Type': 'application/json' });
+          res.end(data);
+        });
+      }
+    );
+    forwardReq.on('error', err => {
+      res.writeHead(502, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Could not reach Gemini image model: ' + err.message }));
+    });
+    forwardReq.write(body);
+    forwardReq.end();
+    return;
+  }
+
   res.writeHead(404, { 'Content-Type': 'application/json' });
   res.end(JSON.stringify({ error: 'Not found' }));
 });
