@@ -35,6 +35,27 @@ function readBody(req){
   });
 }
 
+// Gemini TTS returns raw PCM audio — wrap it in a WAV header so browsers can play it directly
+function pcmToWav(pcmBuffer, sampleRate, channels, bitDepth){
+  const byteRate = sampleRate * channels * (bitDepth / 8);
+  const blockAlign = channels * (bitDepth / 8);
+  const header = Buffer.alloc(44);
+  header.write('RIFF', 0);
+  header.writeUInt32LE(36 + pcmBuffer.length, 4);
+  header.write('WAVE', 8);
+  header.write('fmt ', 12);
+  header.writeUInt32LE(16, 16);
+  header.writeUInt16LE(1, 20); // PCM
+  header.writeUInt16LE(channels, 22);
+  header.writeUInt32LE(sampleRate, 24);
+  header.writeUInt32LE(byteRate, 28);
+  header.writeUInt16LE(blockAlign, 32);
+  header.writeUInt16LE(bitDepth, 34);
+  header.write('data', 36);
+  header.writeUInt32LE(pcmBuffer.length, 40);
+  return Buffer.concat([header, pcmBuffer]);
+}
+
 const server = http.createServer(async (req, res) => {
   // ---- Serve the app ----
   if (req.method === 'GET' && (req.url === '/' || req.url === '/index.html')) {
@@ -188,6 +209,86 @@ const server = http.createServer(async (req, res) => {
     forwardReq.on('error', err => {
       res.writeHead(502, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ error: 'Could not reach Gemini image model: ' + err.message }));
+    });
+    forwardReq.write(body);
+    forwardReq.end();
+    return;
+  }
+
+  // ---- Text-to-speech (Gemini's neural voice models) ----
+  if (req.method === 'POST' && req.url === '/tts') {
+    const apiKey = getApiKey();
+    if (!apiKey) {
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'No Gemini API key set.' }));
+      return;
+    }
+
+    const raw = await readBody(req);
+    let payload;
+    try { payload = JSON.parse(raw); } catch (e) {
+      res.writeHead(400, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Bad request body' }));
+      return;
+    }
+
+    const text = (payload.text || '').slice(0, 4000);
+    const voiceName = payload.voice || 'Kore';
+    const genPayload = {
+      contents: [{ parts: [{ text }] }],
+      generationConfig: {
+        responseModalities: ['AUDIO'],
+        speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName } } }
+      }
+    };
+    const body = JSON.stringify(genPayload);
+
+    const forwardReq = https.request(
+      {
+        hostname: 'generativelanguage.googleapis.com',
+        path: '/v1beta/models/gemini-3.1-flash-tts-preview:generateContent',
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-goog-api-key': apiKey,
+          'Content-Length': Buffer.byteLength(body)
+        }
+      },
+      upstreamRes => {
+        let data = '';
+        upstreamRes.on('data', chunk => { data += chunk; });
+        upstreamRes.on('end', () => {
+          if (upstreamRes.statusCode !== 200) {
+            res.writeHead(upstreamRes.statusCode, { 'Content-Type': 'application/json' });
+            res.end(data);
+            return;
+          }
+          try {
+            const json = JSON.parse(data);
+            const parts = json.candidates && json.candidates[0] && json.candidates[0].content && json.candidates[0].content.parts;
+            const audioPart = parts && parts.find(p => p.inlineData);
+            if (!audioPart) {
+              res.writeHead(502, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ error: 'No audio returned' }));
+              return;
+            }
+            const mime = audioPart.inlineData.mimeType || '';
+            const rateMatch = mime.match(/rate=(\d+)/);
+            const sampleRate = rateMatch ? parseInt(rateMatch[1], 10) : 24000;
+            const pcm = Buffer.from(audioPart.inlineData.data, 'base64');
+            const wav = pcmToWav(pcm, sampleRate, 1, 16);
+            res.writeHead(200, { 'Content-Type': 'audio/wav', 'Content-Length': wav.length });
+            res.end(wav);
+          } catch (err) {
+            res.writeHead(502, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: 'Bad response from TTS: ' + err.message }));
+          }
+        });
+      }
+    );
+    forwardReq.on('error', err => {
+      res.writeHead(502, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Could not reach Gemini TTS: ' + err.message }));
     });
     forwardReq.write(body);
     forwardReq.end();
