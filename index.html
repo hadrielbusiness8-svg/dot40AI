@@ -745,6 +745,45 @@
     return t.length < text.trim().length ? t + '…' : t;
   }
 
+  async function suggestChatTitle(conv){
+    try{
+      const firstUser = conv.messages.find(m => m.role === 'user');
+      const firstAssistant = conv.messages.find(m => m.role === 'assistant' && m.content);
+      if(!firstUser || !firstUser.content) return;
+
+      const res = await fetch(PROXY_URL + '/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: settings.model,
+          messages: [
+            {
+              role: 'system',
+              content: 'Generate a short, natural chat title (3-6 words) summarizing this conversation. Reply with ONLY the title — no quotes, no markdown, no trailing punctuation, nothing else.'
+            },
+            {
+              role: 'user',
+              content: `User said: "${firstUser.content.slice(0, 400)}"` +
+                (firstAssistant ? `\nAssistant replied: "${firstAssistant.content.slice(0, 400)}"` : '')
+            }
+          ]
+        })
+      });
+      if(!res.ok) return;
+      const data = await res.json();
+      let title = data && data.choices && data.choices[0] && data.choices[0].message
+        ? data.choices[0].message.content.trim() : '';
+      title = title.replace(/^["'*]+|["'*]+$/g, '').replace(/[.!?]+$/, '').trim();
+      if(title && title.length <= 60){
+        conv.title = title;
+        persistConversations();
+        renderChatList();
+      }
+    }catch(err){
+      console.error('Dot.40 title suggestion error:', err);
+    }
+  }
+
   // ---------- Rendering messages ----------
   function renderMessages(){
     chatArea.innerHTML = '';
@@ -1284,6 +1323,10 @@
     conv.updatedAt = Date.now();
     persistConversations();
 
+    if(conv.messages.filter(m => m.role === 'user').length === 1){
+      suggestChatTitle(conv);
+    }
+
     voiceModeStatus.textContent = 'Speaking...';
     await speakForVoiceMode(reply);
   }
@@ -1566,6 +1609,10 @@
         ? data.choices[0].message.content : '(No content returned)';
       placeholder.content = reply;
       placeholder.thinking = false;
+
+      if(conv.messages.filter(m => m.role === 'user').length === 1){
+        suggestChatTitle(conv); // fire-and-forget, upgrades the placeholder title once ready
+      }
     }catch(err){
       console.error('Dot.40 chat error:', err);
       placeholder.content = err.message === 'busy'
@@ -1626,6 +1673,10 @@
 
       placeholder.content = reply;
       placeholder.searchLinks = topLinks;
+
+      if(conv.messages.filter(m => m.role === 'user').length === 1){
+        suggestChatTitle(conv);
+      }
     }catch(err){
       console.error('Dot.40 search error:', err);
       placeholder.content = 'Couldn\'t complete that search — try again in a moment.';
@@ -1664,6 +1715,9 @@
       if(imgPart){
         placeholder.image = 'data:' + imgPart.inlineData.mimeType + ';base64,' + imgPart.inlineData.data;
         placeholder.content = '';
+        if(conv.messages.filter(m => m.role === 'user').length === 1){
+          suggestChatTitle(conv);
+        }
       } else {
         placeholder.content = 'No image came back — try describing it a little differently.';
         placeholder.error = true;
