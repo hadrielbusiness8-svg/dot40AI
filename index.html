@@ -568,7 +568,7 @@
     <div class="field">
       <label>Voice</label>
       <select id="voiceSelect"></select>
-      <div class="desc">Used when you tap "Listen" on a reply. Available voices depend on your browser/device.</div>
+      <div class="desc">Real AI voice models from Gemini, used for Listen and Voice Mode. Free quota is small (a couple of uses per minute, ~50/day) — Dot.40 quietly falls back to your device's voice if that's used up.</div>
     </div>
 
     <div class="field">
@@ -608,7 +608,7 @@
     { value:'gemini-3.1-flash-lite', name:'Gemini 3.1 Flash Lite', sub:'Fastest and lightest, simpler tasks' }
   ];
 
-  const defaults = { model: MODELS[0].value, focus: '', accent: '#5b5fff', userName: '', voiceName: '', memoryClearedAt: 0 };
+  const defaults = { model: MODELS[0].value, focus: '', accent: '#5b5fff', userName: '', voiceName: 'Kore', memoryClearedAt: 0 };
 
   let settings = loadSettings();
   let conversations = loadConversations();
@@ -1069,28 +1069,22 @@
     renderSwatches();
   });
 
+  const GEMINI_VOICES = [
+    'Kore','Puck','Zephyr','Charon','Fenrir','Leda','Orus','Aoede','Callirrhoe','Autonoe',
+    'Enceladus','Iapetus','Umbriel','Algieba','Despina','Erinome','Algenib','Rasalgethi',
+    'Laomedeia','Achernar','Alnilam','Schedar','Gacrux','Pulcherrima','Achird',
+    'Zubenelgenubi','Vindemiatrix','Sadachbia','Sadaltager','Sulafat'
+  ];
+
   function renderVoiceOptions(){
-    if(!('speechSynthesis' in window)){
-      voiceSelect.innerHTML = '<option value="">Not supported in this browser</option>';
-      voiceSelect.disabled = true;
-      return;
-    }
-    const voices = window.speechSynthesis.getVoices();
     voiceSelect.innerHTML = '';
-    const defaultOpt = document.createElement('option');
-    defaultOpt.value = '';
-    defaultOpt.textContent = 'Default voice';
-    voiceSelect.appendChild(defaultOpt);
-    voices.forEach(v => {
+    GEMINI_VOICES.forEach(v => {
       const opt = document.createElement('option');
-      opt.value = v.name;
-      opt.textContent = v.name + ' (' + v.lang + ')';
-      if(v.name === settings.voiceName) opt.selected = true;
+      opt.value = v;
+      opt.textContent = v;
+      if(v === settings.voiceName) opt.selected = true;
       voiceSelect.appendChild(opt);
     });
-  }
-  if('speechSynthesis' in window){
-    window.speechSynthesis.onvoiceschanged = renderVoiceOptions;
   }
 
   clearMemoryBtn.addEventListener('click', () => {
@@ -1209,6 +1203,7 @@
     voiceModeActive = false;
     if(voiceModeRecognition){ try{ voiceModeRecognition.stop(); }catch(e){} }
     if('speechSynthesis' in window) window.speechSynthesis.cancel();
+    if(currentAudio){ try{ currentAudio.pause(); }catch(e){} currentAudio = null; }
     hideOrb();
     voiceModeOverlay.classList.remove('open');
     renderChatList();
@@ -1332,31 +1327,34 @@
   }
 
   function speakForVoiceMode(text){
-    return new Promise(resolve => {
-      window.speechSynthesis.cancel();
+    return new Promise(async resolve => {
+      if('speechSynthesis' in window) window.speechSynthesis.cancel();
       const clean = stripForSpeech(text);
       if(!clean.trim()){ resolve(); return; }
 
-      const detectedLang = detectSpeechLang(clean);
-      const langPrefix = detectedLang.split('-')[0];
-      const voices = window.speechSynthesis.getVoices();
-
-      const utter = new SpeechSynthesisUtterance(clean);
-      utter.rate = 1;
-      utter.lang = detectedLang;
-
-      let chosenVoice = null;
-      if(settings.voiceName){
-        const manual = voices.find(v => v.name === settings.voiceName);
-        if(manual && manual.lang.toLowerCase().startsWith(langPrefix)) chosenVoice = manual;
+      try{
+        const res = await fetch('/tts', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ text: clean, voice: settings.voiceName || 'Kore' })
+        });
+        if(!res.ok){
+          const errText = await res.text().catch(() => '');
+          console.error('Dot.40 voice mode TTS error:', res.status, errText);
+          throw new Error('tts-failed');
+        }
+        const blob = await res.blob();
+        const url = URL.createObjectURL(blob);
+        const audio = new Audio(url);
+        currentAudio = audio;
+        showOrb();
+        audio.onended = () => { URL.revokeObjectURL(url); currentAudio = null; resolve(); };
+        audio.onerror = () => { URL.revokeObjectURL(url); currentAudio = null; resolve(); };
+        audio.play();
+      }catch(err){
+        console.error('Dot.40 voice mode TTS error, falling back to device voice:', err);
+        speakWithBrowserVoice(clean, resolve);
       }
-      if(!chosenVoice) chosenVoice = voices.find(v => v.lang.toLowerCase().startsWith(langPrefix));
-      if(chosenVoice) utter.voice = chosenVoice;
-
-      utter.onend = resolve;
-      utter.onerror = resolve;
-      showOrb();
-      window.speechSynthesis.speak(utter);
     });
   }
 
@@ -1602,7 +1600,7 @@
       if(!res.ok){
         const errText = await res.text().catch(()=> '');
         console.error('Dot.40 chat error:', res.status, errText);
-        throw new Error(res.status === 429 ? 'busy' : 'failed');
+        throw new Error(res.status === 429 ? 'busy' : res.status === 503 ? 'overloaded' : 'failed');
       }
       const data = await res.json();
       const reply = data && data.choices && data.choices[0] && data.choices[0].message
@@ -1617,6 +1615,8 @@
       console.error('Dot.40 chat error:', err);
       placeholder.content = err.message === 'busy'
         ? 'I\'m a little busy right now — give it a moment and try again.'
+        : err.message === 'overloaded'
+        ? 'Google\'s servers are overloaded right now — try again shortly, or switch models in Settings.'
         : 'Something went wrong sending that. Try again in a moment.';
       placeholder.error = true;
     }
@@ -1707,7 +1707,7 @@
       if(!res.ok){
         const errText = await res.text().catch(() => '');
         console.error('Dot.40 image error:', res.status, errText);
-        throw new Error(res.status === 429 ? 'busy' : 'failed');
+        throw new Error(res.status === 429 ? 'busy' : res.status === 503 ? 'overloaded' : 'failed');
       }
       const data = await res.json();
       const parts = data && data.candidates && data.candidates[0] && data.candidates[0].content && data.candidates[0].content.parts;
@@ -1726,6 +1726,8 @@
       console.error('Dot.40 image error:', err);
       placeholder.content = err.message === 'busy'
         ? 'Hit the free daily image limit — try again a bit later.'
+        : err.message === 'overloaded'
+        ? 'Google\'s image servers are overloaded right now — try again shortly.'
         : 'Couldn\'t generate that image — try again in a moment.';
       placeholder.error = true;
     }
@@ -1777,10 +1779,13 @@
     return t.trim();
   }
 
+  let currentAudio = null;
+
   function resetSpeakBtn(){
     if(speakingBtn) speakingBtn.innerHTML = SPEAK_ICON + ' Listen';
     speakingMsg = null;
     speakingBtn = null;
+    currentAudio = null;
     hideOrb();
   }
 
@@ -1805,53 +1810,73 @@
       'pt-PT': hits(/\b(o|a|os|as|de|que|e|é|para|com|uma|não)\b/g) + hits(/[ãõ]/g) * 2,
       'it-IT': hits(/\b(il|la|di|che|e|è|per|con|una|non|sono)\b/g)
     };
-    let best = 'en-US', bestScore = 1; // require at least 2 hits to override English default
+    let best = 'en-US', bestScore = 1;
     for(const [lang, score] of Object.entries(scores)){
       if(score > bestScore){ bestScore = score; best = lang; }
     }
     return best;
   }
 
-  function toggleSpeak(m, btn){
-    if(!('speechSynthesis' in window)){
-      alert('Text-to-speech isn\'t supported in this browser.');
-      return;
-    }
-    if(speakingMsg === m){
-      window.speechSynthesis.cancel();
-      resetSpeakBtn();
-      return;
-    }
+  // Only used as a fallback when Gemini's voice models are unavailable/rate-limited
+  function speakWithBrowserVoice(text, onDone){
+    if(!('speechSynthesis' in window)){ onDone(); return; }
     window.speechSynthesis.cancel();
-    const text = stripForSpeech(m.content);
-    if(!text.trim()) return;
-
     const detectedLang = detectSpeechLang(text);
     const langPrefix = detectedLang.split('-')[0];
     const voices = window.speechSynthesis.getVoices();
-
     const utter = new SpeechSynthesisUtterance(text);
     utter.rate = 1;
     utter.lang = detectedLang;
+    const match = voices.find(v => v.lang.toLowerCase().startsWith(langPrefix));
+    if(match) utter.voice = match;
+    utter.onend = onDone;
+    utter.onerror = onDone;
+    showOrb();
+    window.speechSynthesis.speak(utter);
+  }
 
-    let chosenVoice = null;
-    if(settings.voiceName){
-      const manual = voices.find(v => v.name === settings.voiceName);
-      if(manual && manual.lang.toLowerCase().startsWith(langPrefix)) chosenVoice = manual;
+  async function toggleSpeak(m, btn){
+    if(speakingMsg === m){
+      if(currentAudio){ currentAudio.pause(); }
+      if('speechSynthesis' in window) window.speechSynthesis.cancel();
+      resetSpeakBtn();
+      return;
     }
-    if(!chosenVoice){
-      chosenVoice = voices.find(v => v.lang.toLowerCase().startsWith(langPrefix));
-    }
-    if(chosenVoice) utter.voice = chosenVoice;
+    if(currentAudio){ currentAudio.pause(); }
+    if('speechSynthesis' in window) window.speechSynthesis.cancel();
 
-    utter.onend = resetSpeakBtn;
-    utter.onerror = resetSpeakBtn;
+    const text = stripForSpeech(m.content);
+    if(!text.trim()) return;
 
     speakingMsg = m;
     speakingBtn = btn;
-    btn.innerHTML = STOP_ICON + ' Stop';
-    showOrb();
-    window.speechSynthesis.speak(utter);
+    btn.innerHTML = STOP_ICON + ' Loading...';
+
+    try{
+      const res = await fetch('/tts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text, voice: settings.voiceName || 'Kore' })
+      });
+      if(!res.ok){
+        const errText = await res.text().catch(() => '');
+        console.error('Dot.40 TTS error:', res.status, errText);
+        throw new Error('tts-failed');
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const audio = new Audio(url);
+      currentAudio = audio;
+      btn.innerHTML = STOP_ICON + ' Stop';
+      showOrb();
+      audio.onended = () => { URL.revokeObjectURL(url); resetSpeakBtn(); };
+      audio.onerror = () => { URL.revokeObjectURL(url); resetSpeakBtn(); };
+      audio.play();
+    }catch(err){
+      console.error('Dot.40 TTS error, falling back to device voice:', err);
+      btn.innerHTML = STOP_ICON + ' Stop';
+      speakWithBrowserVoice(text, resetSpeakBtn);
+    }
   }
 
   // ---------- PDF export ----------
