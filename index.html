@@ -87,6 +87,14 @@
   .new-chat-btn:hover{ border-color:color-mix(in srgb, var(--accent) 50%, var(--border)); background:var(--panel); }
   .new-chat-btn svg{ width:15px; height:15px; }
 
+  .sidebar-search{
+    width:100%; margin-top:10px; padding:8px 12px; border-radius:9px;
+    border:1px solid var(--border); background:var(--panel-2); color:var(--text);
+    font-family:var(--font-body); font-size:12.5px; outline:none;
+  }
+  .sidebar-search:focus{ border-color:color-mix(in srgb, var(--accent) 50%, var(--border)); }
+  .sidebar-search::placeholder{ color:var(--text-dim); }
+
   .chat-list{
     flex:1;
     overflow-y:auto;
@@ -125,6 +133,16 @@
   .chat-item:hover .del{ opacity:1; }
   .chat-item .del:hover{ color:var(--danger); }
   .chat-item .del svg{ width:13px; height:13px; }
+
+  .chat-item .pin{
+    opacity:0; color:var(--text-dim); display:flex; flex-shrink:0; cursor:pointer;
+  }
+  .chat-item:hover .pin, .chat-item .pin.active{ opacity:1; }
+  .chat-item .pin.active{ color:var(--accent); }
+  .chat-item .pin svg{ width:13px; height:13px; }
+  .chat-item .title[contenteditable="true"]{
+    outline:1px solid var(--accent); border-radius:4px; padding:1px 4px; background:var(--panel-2);
+  }
 
   .empty-sidebar{
     color:var(--text-dim);
@@ -453,6 +471,7 @@
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14" stroke-linecap="round"/></svg>
       New chat
     </button>
+    <input type="text" id="sidebarSearch" class="sidebar-search" placeholder="Search chats...">
   </div>
   <div class="chat-list" id="chatList"></div>
 </div>
@@ -578,6 +597,16 @@
     </div>
 
     <div class="field">
+      <label>Backup</label>
+      <div class="desc" style="margin-top:0;">Everything lives only in this browser. Download a backup, or restore one, so clearing your browser doesn't lose your chats.</div>
+      <div style="display:flex; gap:10px; margin-top:10px;">
+        <button class="btn" id="exportChatsBtn">Export all chats</button>
+        <button class="btn" id="importChatsBtn">Import chats</button>
+      </div>
+      <input type="file" id="importChatsInput" accept="application/json" style="display:none;">
+    </div>
+
+    <div class="field">
       <label>Accent color</label>
       <div class="swatches" id="swatches"></div>
       <div class="custom-color-row">
@@ -622,6 +651,8 @@
   const sidebar = document.getElementById('sidebar');
   const sidebarToggle = document.getElementById('sidebarToggle');
   const chatList = document.getElementById('chatList');
+  const sidebarSearch = document.getElementById('sidebarSearch');
+  sidebarSearch.addEventListener('input', () => renderChatList());
   const newChatBtn = document.getElementById('newChatBtn');
 
   const chatArea = document.getElementById('chatArea');
@@ -722,17 +753,67 @@
       chatList.innerHTML = '<div class="empty-sidebar">No chats yet</div>';
       return;
     }
-    conversations.sort((a,b) => b.updatedAt - a.updatedAt);
-    conversations.forEach(c => {
+    const filter = (sidebarSearch.value || '').trim().toLowerCase();
+
+    conversations.sort((a,b) => {
+      if(!!b.pinned !== !!a.pinned) return (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0);
+      return b.updatedAt - a.updatedAt;
+    });
+    const visible = filter
+      ? conversations.filter(c => (c.title || '').toLowerCase().includes(filter))
+      : conversations;
+
+    if(!visible.length){
+      chatList.innerHTML = '<div class="empty-sidebar">No matching chats</div>';
+      return;
+    }
+
+    visible.forEach(c => {
       const item = document.createElement('div');
       item.className = 'chat-item' + (c.id === currentId ? ' active' : '');
+
+      const pin = document.createElement('div');
+      pin.className = 'pin' + (c.pinned ? ' active' : '');
+      pin.title = c.pinned ? 'Unpin' : 'Pin to top';
+      pin.innerHTML = '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l1.5 5.5L19 9l-4 4 1 6-4-3-4 3 1-6-4-4 5.5-1.5z"/></svg>';
+      pin.addEventListener('click', (e) => {
+        e.stopPropagation();
+        c.pinned = !c.pinned;
+        persistConversations();
+        renderChatList();
+      });
+
       const title = document.createElement('div');
       title.className = 'title';
       title.textContent = c.title || 'New chat';
+      title.title = 'Double-click to rename';
+      title.addEventListener('dblclick', (e) => {
+        e.stopPropagation();
+        title.contentEditable = 'true';
+        title.focus();
+        document.execCommand('selectAll', false, null);
+      });
+      title.addEventListener('click', (e) => { if(title.isContentEditable) e.stopPropagation(); });
+      title.addEventListener('blur', () => {
+        title.contentEditable = 'false';
+        const newTitle = title.textContent.trim();
+        if(newTitle && newTitle !== c.title){
+          c.title = newTitle.slice(0, 60);
+          persistConversations();
+        }
+        renderChatList();
+      });
+      title.addEventListener('keydown', (e) => {
+        if(e.key === 'Enter'){ e.preventDefault(); title.blur(); }
+        if(e.key === 'Escape'){ title.textContent = c.title || 'New chat'; title.blur(); }
+      });
+
       const del = document.createElement('div');
       del.className = 'del';
       del.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 6l12 12M18 6L6 18" stroke-linecap="round"/></svg>';
       del.addEventListener('click', (e) => deleteConversation(c.id, e));
+
+      item.appendChild(pin);
       item.appendChild(title);
       item.appendChild(del);
       item.addEventListener('click', () => selectConversation(c.id));
@@ -1092,6 +1173,46 @@
     settings.memoryClearedAt = Date.now();
     persistSettings();
     saveStatus.textContent = 'Memory cleared.';
+  });
+
+  const exportChatsBtn = document.getElementById('exportChatsBtn');
+  const importChatsBtn = document.getElementById('importChatsBtn');
+  const importChatsInput = document.getElementById('importChatsInput');
+
+  exportChatsBtn.addEventListener('click', () => {
+    const blob = new Blob([JSON.stringify(conversations, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'dot40-chats-backup.json';
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    saveStatus.textContent = 'Chats exported.';
+  });
+
+  importChatsBtn.addEventListener('click', () => importChatsInput.click());
+  importChatsInput.addEventListener('change', async () => {
+    const f = importChatsInput.files[0];
+    if(!f) return;
+    try{
+      const text = await f.text();
+      const imported = JSON.parse(text);
+      if(!Array.isArray(imported)) throw new Error('not an array');
+      const existingIds = new Set(conversations.map(c => c.id));
+      let added = 0;
+      imported.forEach(c => {
+        if(c && c.id && !existingIds.has(c.id)){
+          conversations.push(c);
+          added++;
+        }
+      });
+      persistConversations();
+      renderChatList();
+      saveStatus.textContent = `Imported ${added} chat${added === 1 ? '' : 's'}.`;
+    }catch(err){
+      saveStatus.textContent = 'Could not import — file doesn\'t look like a Dot.40 backup.';
+    }
+    importChatsInput.value = '';
   });
 
   saveBtn.addEventListener('click', () => {
@@ -1588,12 +1709,20 @@
         return { role:'user', content: m === conv.messages[conv.messages.length - 2] ? userContent : (m.content || '(attachment)') };
       });
 
+    // grab the actual bubble element so we can update it live as text streams in,
+    // instead of re-rendering the whole message list on every chunk
+    const rows = chatArea.querySelectorAll('.msg.assistant');
+    const lastRow = rows[rows.length - 1];
+    const bubbleEl = lastRow ? lastRow.querySelector('.bubble') : null;
+    const avatarEl = lastRow ? lastRow.querySelector('.avatar') : null;
+
     try{
       const res = await fetch(PROXY_URL + '/chat', {
         method:'POST',
         headers:{ 'Content-Type':'application/json' },
         body: JSON.stringify({
           model: settings.model,
+          stream: true,
           messages: [{ role:'system', content: systemPrompt }, ...historyForApi]
         })
       });
@@ -1602,10 +1731,48 @@
         console.error('Dot.40 chat error:', res.status, errText);
         throw new Error(res.status === 429 ? 'busy' : res.status === 503 ? 'overloaded' : 'failed');
       }
-      const data = await res.json();
-      const reply = data && data.choices && data.choices[0] && data.choices[0].message
-        ? data.choices[0].message.content : '(No content returned)';
-      placeholder.content = reply;
+
+      let accumulated = '';
+      if(res.body && res.body.getReader){
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+        placeholder.content = '';
+        placeholder.thinking = false;
+        if(avatarEl) avatarEl.classList.remove('thinking');
+
+        while(true){
+          const { done, value } = await reader.read();
+          if(done) break;
+          buffer += decoder.decode(value, { stream: true });
+          const events = buffer.split('\n\n');
+          buffer = events.pop(); // keep the last (possibly incomplete) chunk for next time
+
+          for(const evt of events){
+            const line = evt.split('\n').find(l => l.startsWith('data:'));
+            if(!line) continue;
+            const jsonStr = line.slice(5).trim();
+            if(jsonStr === '[DONE]') continue;
+            try{
+              const parsed = JSON.parse(jsonStr);
+              const delta = parsed && parsed.choices && parsed.choices[0] && parsed.choices[0].delta;
+              const piece = delta && delta.content;
+              if(piece){
+                accumulated += piece;
+                if(bubbleEl) bubbleEl.textContent = accumulated;
+                scrollToBottom();
+              }
+            }catch(e){ /* ignore partial/malformed SSE fragments */ }
+          }
+        }
+      } else {
+        // very old browsers without streaming support: fall back to reading it all at once
+        const data = await res.json();
+        accumulated = data && data.choices && data.choices[0] && data.choices[0].message
+          ? data.choices[0].message.content : '(No content returned)';
+      }
+
+      placeholder.content = accumulated || '(No content returned)';
       placeholder.thinking = false;
 
       if(conv.messages.filter(m => m.role === 'user').length === 1){
