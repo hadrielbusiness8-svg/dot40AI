@@ -322,13 +322,22 @@
 
   .gen-image{ max-width:100%; border-radius:12px; border:1px solid var(--border); display:block; }
 
-  .msg-actions{ display:flex; gap:6px; opacity:0; transition:opacity 0.15s ease; }
-  .msg:hover .msg-actions{ opacity:1; }
+  .msg-actions{ display:flex; gap:6px; opacity:0.55; transition:opacity 0.15s ease; }
+  .msg-actions:hover{ opacity:1; }
   .msg-actions button{
     border:none; background:none; color:var(--text-dim); cursor:pointer;
     font-family:var(--font-mono); font-size:10.5px; display:flex; align-items:center; gap:4px;
   }
   .msg-actions button:hover{ color:var(--accent); }
+
+  .edit-textarea{
+    width:100%; min-width:280px; background:color-mix(in srgb, var(--accent) 16%, var(--panel));
+    border:1px solid color-mix(in srgb, var(--accent) 40%, var(--border)); border-radius:var(--radius);
+    padding:12px 15px; color:var(--text); font-family:var(--font-body); font-size:14.5px;
+    line-height:1.6; resize:none; outline:none;
+  }
+  .edit-actions{ display:flex; gap:8px; justify-content:flex-end; margin-top:8px; }
+  .edit-actions .btn{ flex:none; padding:7px 14px; font-size:12.5px; }
   .msg-actions svg{ width:12px; height:12px; }
 
   /* ---------- Composer ---------- */
@@ -884,11 +893,11 @@
       chatArea.appendChild(emptyState);
       return;
     }
-    conv.messages.forEach(m => renderOneMessage(m));
+    conv.messages.forEach(m => renderOneMessage(m, conv));
     scrollToBottom();
   }
 
-  function renderOneMessage(m){
+  function renderOneMessage(m, conv){
     const row = document.createElement('div');
     row.className = 'msg ' + m.role;
 
@@ -963,6 +972,22 @@
       pdfBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/></svg> PDF';
       pdfBtn.addEventListener('click', () => exportMessageAsPdf(m));
       actions.appendChild(pdfBtn);
+
+      const regenBtn = document.createElement('button');
+      regenBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 4v6h-6M1 20v-6h6" stroke-linecap="round" stroke-linejoin="round"/><path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15" stroke-linecap="round" stroke-linejoin="round"/></svg> Regenerate';
+      regenBtn.addEventListener('click', () => regenerateMessage(m, conv));
+      actions.appendChild(regenBtn);
+
+      col.appendChild(actions);
+    }
+
+    if(m.role === 'user' && m.content){
+      const actions = document.createElement('div');
+      actions.className = 'msg-actions';
+      const editBtn = document.createElement('button');
+      editBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9M16.5 3.5a2.12 2.12 0 013 3L7 19l-4 1 1-4L16.5 3.5z" stroke-linecap="round" stroke-linejoin="round"/></svg> Edit';
+      editBtn.addEventListener('click', () => startEditMessage(m, conv, col));
+      actions.appendChild(editBtn);
       col.appendChild(actions);
     }
 
@@ -1679,6 +1704,77 @@
     }
     const joined = bits.join(' | ');
     return joined.slice(-4000); // keep the most recent slice, cap payload size
+  }
+
+  function regenerateMessage(m, conv){
+    const idx = conv.messages.indexOf(m);
+    if(idx === -1) return;
+    let userMsg = null;
+    for(let i = idx - 1; i >= 0; i--){
+      if(conv.messages[i].role === 'user'){ userMsg = conv.messages[i]; break; }
+    }
+    if(!userMsg) return;
+
+    // remove this reply and anything after it — regenerating from here forward
+    conv.messages.splice(idx, conv.messages.length - idx);
+    persistConversations();
+    renderMessages();
+
+    if(m.image){
+      handleImageGeneration(userMsg.content, conv);
+    } else if(m.searchLinks){
+      handleWebSearch(userMsg.content, conv);
+    } else {
+      handleChat(userMsg.content, userMsg.attachments || [], conv);
+    }
+  }
+
+  function startEditMessage(m, conv, col){
+    const bubble = col.querySelector('.bubble');
+    const actionsRow = col.querySelector('.msg-actions');
+    if(!bubble) return;
+
+    const textarea = document.createElement('textarea');
+    textarea.className = 'edit-textarea';
+    textarea.value = m.content;
+    bubble.replaceWith(textarea);
+    if(actionsRow) actionsRow.style.display = 'none';
+    textarea.focus();
+    textarea.setSelectionRange(textarea.value.length, textarea.value.length);
+    textarea.style.height = 'auto';
+    textarea.style.height = textarea.scrollHeight + 'px';
+    textarea.addEventListener('input', () => {
+      textarea.style.height = 'auto';
+      textarea.style.height = textarea.scrollHeight + 'px';
+    });
+
+    const editActions = document.createElement('div');
+    editActions.className = 'edit-actions';
+    const saveBtn2 = document.createElement('button');
+    saveBtn2.className = 'btn primary';
+    saveBtn2.textContent = 'Save & regenerate';
+    const cancelBtn2 = document.createElement('button');
+    cancelBtn2.className = 'btn';
+    cancelBtn2.textContent = 'Cancel';
+    editActions.appendChild(cancelBtn2);
+    editActions.appendChild(saveBtn2);
+    textarea.insertAdjacentElement('afterend', editActions);
+
+    cancelBtn2.addEventListener('click', () => renderMessages());
+
+    saveBtn2.addEventListener('click', () => {
+      const newText = textarea.value.trim();
+      if(!newText) return;
+      const idx = conv.messages.indexOf(m);
+      if(idx === -1) return;
+      m.content = newText;
+      // editing a message invalidates everything that came after it
+      conv.messages.splice(idx + 1, conv.messages.length - (idx + 1));
+      conv.updatedAt = Date.now();
+      persistConversations();
+      renderMessages();
+      handleChat(newText, m.attachments || [], conv);
+    });
   }
 
   async function handleChat(text, attachments, conv){
