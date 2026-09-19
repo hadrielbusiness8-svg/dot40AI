@@ -121,12 +121,25 @@ const server = http.createServer(async (req, res) => {
         }
       },
       upstreamRes => {
-        let data = '';
-        upstreamRes.on('data', chunk => { data += chunk; });
-        upstreamRes.on('end', () => {
-          res.writeHead(upstreamRes.statusCode, { 'Content-Type': 'application/json' });
-          res.end(data);
+        // Errors never arrive in SSE format, so buffer and pass through as JSON either way
+        if (upstreamRes.statusCode !== 200 || !payload.stream) {
+          let data = '';
+          upstreamRes.on('data', chunk => { data += chunk; });
+          upstreamRes.on('end', () => {
+            res.writeHead(upstreamRes.statusCode, { 'Content-Type': 'application/json' });
+            res.end(data);
+          });
+          return;
+        }
+        // Streaming path: pipe Gemini's server-sent-events straight through as they arrive
+        res.writeHead(200, {
+          'Content-Type': 'text/event-stream',
+          'Cache-Control': 'no-cache',
+          'Connection': 'keep-alive'
         });
+        upstreamRes.on('data', chunk => res.write(chunk));
+        upstreamRes.on('end', () => res.end());
+        upstreamRes.on('error', () => res.end());
       }
     );
     forwardReq.on('error', err => {
