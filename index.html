@@ -501,11 +501,11 @@
 
 <div class="sidebar" id="sidebar">
   <div class="sidebar-head">
-    <button class="new-chat-btn" id="newChatBtn">
+    <button class="new-chat-btn" id="newChatBtn" title="New chat (Ctrl/Cmd+K)">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14" stroke-linecap="round"/></svg>
       New chat
     </button>
-    <input type="text" id="sidebarSearch" class="sidebar-search" placeholder="Search chats...">
+    <input type="text" id="sidebarSearch" class="sidebar-search" placeholder="Search chats... (Ctrl/Cmd+F)">
   </div>
   <div class="chat-list" id="chatList"></div>
 </div>
@@ -1578,6 +1578,34 @@
 
   voiceModeBtn.addEventListener('click', startVoiceMode);
   voiceModeClose.addEventListener('click', stopVoiceMode);
+
+  // ---------- Keyboard shortcuts ----------
+  document.addEventListener('keydown', (e) => {
+    const mod = e.ctrlKey || e.metaKey; // metaKey covers Cmd on Mac
+
+    // Ctrl/Cmd+K — start a new chat
+    if(mod && e.key.toLowerCase() === 'k'){
+      e.preventDefault();
+      createConversation();
+      input.focus();
+      return;
+    }
+
+    // Ctrl/Cmd+F — jump to the sidebar search box (only when not already typing a message)
+    if(mod && e.key.toLowerCase() === 'f' && document.activeElement !== input){
+      e.preventDefault();
+      sidebarSearch.focus();
+      return;
+    }
+
+    // Esc — close whatever's currently open, top layer first
+    if(e.key === 'Escape'){
+      if(previewModal.classList.contains('open')){ closePreviewModal(); return; }
+      if(voiceModeOverlay.classList.contains('open')){ stopVoiceMode(); return; }
+      if(settingsPanel.classList.contains('open')){ closeSettingsPanel(); return; }
+      if(window.innerWidth <= 820 && sidebar.classList.contains('open')){ sidebar.classList.remove('open'); return; }
+    }
+  });
 
   // ---------- Attachments ----------
   attachBtn.addEventListener('click', () => fileInput.click());
