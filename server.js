@@ -89,6 +89,33 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  // ---- PWA files (installable app support) ----
+  if (req.method === 'GET' && req.url === '/manifest.json') {
+    fs.readFile(path.join(__dirname, 'manifest.json'), (err, data) => {
+      if (err) { res.writeHead(404); res.end(); return; }
+      res.writeHead(200, { 'Content-Type': 'application/manifest+json' });
+      res.end(data);
+    });
+    return;
+  }
+  if (req.method === 'GET' && req.url === '/service-worker.js') {
+    fs.readFile(path.join(__dirname, 'service-worker.js'), (err, data) => {
+      if (err) { res.writeHead(404); res.end(); return; }
+      res.writeHead(200, { 'Content-Type': 'application/javascript' });
+      res.end(data);
+    });
+    return;
+  }
+  if (req.method === 'GET' && req.url.startsWith('/icons/')) {
+    const iconFile = path.basename(req.url); // strip any path traversal attempts
+    fs.readFile(path.join(__dirname, 'icons', iconFile), (err, data) => {
+      if (err) { res.writeHead(404); res.end(); return; }
+      res.writeHead(200, { 'Content-Type': 'image/png' });
+      res.end(data);
+    });
+    return;
+  }
+
   // ---- Chat proxy (OpenAI-compatible Gemini endpoint) ----
   if (req.method === 'POST' && req.url === '/chat') {
     const apiKey = getApiKey();
