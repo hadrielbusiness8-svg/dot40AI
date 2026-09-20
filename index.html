@@ -465,6 +465,14 @@
 
   .status-note{ font-family:var(--font-mono); font-size:10.5px; color:var(--text-dim); line-height:1.6; padding:2px 2px 0; text-align:center; padding-bottom:14px; }
 
+  .usage-stats{ display:flex; gap:10px; flex-wrap:wrap; }
+  .usage-stat{
+    flex:1; min-width:80px; background:var(--panel-2); border:1px solid var(--border);
+    border-radius:10px; padding:10px 12px; text-align:center;
+  }
+  .usage-stat .num{ font-family:var(--font-display); font-size:20px; font-weight:700; color:var(--accent); }
+  .usage-stat .label{ font-family:var(--font-mono); font-size:10px; color:var(--text-dim); margin-top:2px; }
+
   @media (max-width:820px){
     .sidebar{ position:fixed; z-index:40; margin-left:-250px; }
     .sidebar.open{ margin-left:0; }
@@ -610,6 +618,12 @@
     </div>
 
     <div class="field">
+      <label>Usage today</label>
+      <div id="usageStats" class="usage-stats"></div>
+      <div class="desc">A rough local count of API calls made today — not exact against Google's own quota, but useful for spotting a limit before you hit it. Resets at midnight your time.</div>
+    </div>
+
+    <div class="field">
       <label>Backup</label>
       <div class="desc" style="margin-top:0;">Everything lives only in this browser. Download a backup, or restore one, so clearing your browser doesn't lose your chats.</div>
       <div style="display:flex; gap:10px; margin-top:10px;">
@@ -640,6 +654,7 @@
 (function(){
   const SETTINGS_KEY = 'dot40_settings_v2';
   const CONV_KEY = 'dot40_conversations_v1';
+  const USAGE_KEY = 'dot40_usage_v1';
   const PROXY_URL = ''; // same-origin — server.js handles both the page and /chat
 
   const PRESET_COLORS = ['#5b5fff', '#ff5c8a', '#22c98a', '#ffb347', '#3ec6ff', '#c084fc'];
@@ -721,6 +736,35 @@
     return [];
   }
   function persistConversations(){ localStorage.setItem(CONV_KEY, JSON.stringify(conversations)); }
+
+  function todayStr(){
+    const d = new Date();
+    return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
+  }
+
+  function trackUsage(type){
+    let usage;
+    try{ usage = JSON.parse(localStorage.getItem(USAGE_KEY)) || {}; }catch(e){ usage = {}; }
+    if(usage.date !== todayStr()){
+      usage = { date: todayStr(), chat: 0, image: 0, tts: 0 };
+    }
+    usage[type] = (usage[type] || 0) + 1;
+    localStorage.setItem(USAGE_KEY, JSON.stringify(usage));
+    renderUsageStats();
+  }
+
+  function renderUsageStats(){
+    const el = document.getElementById('usageStats');
+    if(!el) return;
+    let usage;
+    try{ usage = JSON.parse(localStorage.getItem(USAGE_KEY)) || {}; }catch(e){ usage = {}; }
+    if(usage.date !== todayStr()) usage = { chat: 0, image: 0, tts: 0 };
+    el.innerHTML = `
+      <div class="usage-stat"><div class="num">${usage.chat || 0}</div><div class="label">Chat</div></div>
+      <div class="usage-stat"><div class="num">${usage.image || 0}</div><div class="label">Images</div></div>
+      <div class="usage-stat"><div class="num">${usage.tts || 0}</div><div class="label">Voice</div></div>
+    `;
+  }
 
   function applyAccent(color){ document.documentElement.style.setProperty('--accent', color); }
 
@@ -852,6 +896,7 @@
       const firstAssistant = conv.messages.find(m => m.role === 'assistant' && m.content);
       if(!firstUser || !firstUser.content) return;
 
+      trackUsage('chat');
       const res = await fetch(PROXY_URL + '/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -1167,6 +1212,7 @@
     renderModelOptions();
     renderSwatches();
     renderVoiceOptions();
+    renderUsageStats();
     overlay.classList.add('open');
     settingsPanel.classList.add('open');
   }
@@ -1455,6 +1501,7 @@
 
     let reply = 'Sorry, I couldn\'t reach the AI just now.';
     try{
+      trackUsage('chat');
       const res = await fetch(PROXY_URL + '/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -1490,6 +1537,7 @@
       if(!clean.trim()){ resolve(); return; }
 
       try{
+        trackUsage('tts');
         const res = await fetch('/tts', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -1824,6 +1872,7 @@
     const avatarEl = lastRow ? lastRow.querySelector('.avatar') : null;
 
     try{
+      trackUsage('chat');
       const res = await fetch(PROXY_URL + '/chat', {
         method:'POST',
         headers:{ 'Content-Type':'application/json' },
@@ -1929,6 +1978,7 @@
         'If the context doesn\'t actually answer the question, say so honestly rather than guessing.' +
         (searchContext ? `\n\nWeb search context for "${query}": ${searchContext}` : '\n\n(No useful search context was found for this query.)');
 
+      trackUsage('chat');
       const chatRes = await fetch(PROXY_URL + '/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -1973,6 +2023,7 @@
         renderMessages();
         return;
       }
+      trackUsage('image');
       const res = await fetch(PROXY_URL + '/image', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -2127,6 +2178,7 @@
     btn.innerHTML = STOP_ICON + ' Loading...';
 
     try{
+      trackUsage('tts');
       const res = await fetch('/tts', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
