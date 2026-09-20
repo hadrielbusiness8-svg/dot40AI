@@ -13,6 +13,13 @@
 <!-- once your domain is live, set this to your real URL, e.g. https://dot40-ai.com -->
 <meta property="og:url" content="https://dot40-ai.com">
 <meta name="robots" content="index, follow">
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#5b5fff">
+<link rel="icon" href="/icons/icon-192.png" type="image/png">
+<link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Dot.40">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
@@ -665,6 +672,14 @@
 
 <script>
 (function(){
+  if('serviceWorker' in navigator){
+    window.addEventListener('load', () => {
+      navigator.serviceWorker.register('/service-worker.js').catch(err => {
+        console.error('Dot.40 service worker registration failed:', err);
+      });
+    });
+  }
+
   const SETTINGS_KEY = 'dot40_settings_v2';
   const CONV_KEY = 'dot40_conversations_v1';
   const USAGE_KEY = 'dot40_usage_v1';
