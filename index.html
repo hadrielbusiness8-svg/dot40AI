@@ -610,7 +610,7 @@
     <div class="field">
       <label>Model</label>
       <div class="model-options" id="modelOptions"></div>
-      <div class="desc">Image generation uses Gemini's Nano Banana model — free tier, ~500 images/day.</div>
+      <div class="desc">Image generation uses Pollinations.ai (free, no key, no daily limit) — tries a Nano Banana style model first, falling back automatically to a reliable general model if that's unavailable.</div>
     </div>
 
     <div class="field">
@@ -2109,41 +2109,35 @@
         return;
       }
       trackUsage('image');
-      const res = await fetch(PROXY_URL + '/image', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prompt: prompt.trim() })
-      });
-      if(!res.ok){
-        const errText = await res.text().catch(() => '');
-        console.error('Dot.40 image error:', res.status, errText);
-        throw new Error(res.status === 429 ? 'busy' : res.status === 503 ? 'overloaded' : 'failed');
-      }
-      const data = await res.json();
-      const parts = data && data.candidates && data.candidates[0] && data.candidates[0].content && data.candidates[0].content.parts;
-      const imgPart = parts && parts.find(p => p.inlineData);
-      if(imgPart){
-        placeholder.image = 'data:' + imgPart.inlineData.mimeType + ';base64,' + imgPart.inlineData.data;
-        placeholder.content = '';
-        if(conv.messages.filter(m => m.role === 'user').length === 1){
-          suggestChatTitle(conv);
-        }
-      } else {
-        placeholder.content = 'No image came back — try describing it a little differently.';
-        placeholder.error = true;
+      const qualityPrompt = prompt.trim() + ', highly detailed, sharp focus, professional quality, 4k';
+      const dataUrl = await fetchPollinationsImage(qualityPrompt, 'nanobanana')
+        .catch(() => fetchPollinationsImage(qualityPrompt, 'flux')); // fall back if that model isn't available anonymously
+      placeholder.image = dataUrl;
+      placeholder.content = '';
+      if(conv.messages.filter(m => m.role === 'user').length === 1){
+        suggestChatTitle(conv);
       }
     }catch(err){
       console.error('Dot.40 image error:', err);
-      placeholder.content = err.message === 'busy'
-        ? 'Hit the free daily image limit — try again a bit later.'
-        : err.message === 'overloaded'
-        ? 'Google\'s image servers are overloaded right now — try again shortly.'
-        : 'Couldn\'t generate that image — try again in a moment.';
+      placeholder.content = 'Couldn\'t generate that image — try again in a moment.';
       placeholder.error = true;
     }
     conv.updatedAt = Date.now();
     persistConversations();
     renderMessages();
+  }
+
+  async function fetchPollinationsImage(prompt, model){
+    const seed = Math.floor(Math.random() * 1000000);
+    const url = 'https://image.pollinations.ai/prompt/' + encodeURIComponent(prompt) +
+      '?width=1536&height=1536&nologo=true&model=' + model + '&enhance=true&seed=' + seed;
+    const res = await fetch(url);
+    if(!res.ok){
+      console.error('Dot.40 image error (' + model + '):', res.status);
+      throw new Error('failed');
+    }
+    const blob = await res.blob();
+    return blobToDataUrl(blob);
   }
 
   function blobToDataUrl(blob){
