@@ -41,6 +41,24 @@
     --font-body:'Inter', sans-serif;
     --font-mono:'JetBrains Mono', monospace;
   }
+  html[data-theme="light"]{
+    --bg:#f5f6fa;
+    --panel:#ffffff;
+    --panel-2:#eef0f5;
+    --border:#dfe1e8;
+    --text:#1a1c23;
+    --text-muted:#5b5e6d;
+    --text-dim:#8b8ea0;
+    --accent-soft:rgba(91,95,255,0.10);
+    --danger:#e0504f;
+  }
+  html[data-theme="light"] .composer-wrap{
+    background:linear-gradient(to top, var(--bg) 55%, transparent);
+  }
+  html[data-theme="light"] .empty-state .dot-logo,
+  html[data-theme="light"] .msg.assistant .avatar{
+    box-shadow:0 0 0 4px var(--accent-soft), 0 0 14px color-mix(in srgb, var(--accent) 35%, transparent);
+  }
   *{box-sizing:border-box; margin:0; padding:0;}
   html,body{height:100%;}
   body{
@@ -257,7 +275,7 @@
   .msg.user .bubble-col{ align-items:flex-end; }
 
   .bubble{
-    padding:12px 15px; border-radius:var(--radius); font-size:14.5px; line-height:1.6;
+    padding:12px 15px; border-radius:var(--radius); font-size:var(--msg-font-size, 14.5px); line-height:1.6;
     white-space:pre-wrap; word-wrap:break-word;
   }
   .msg.assistant .bubble{ background:none; border:none; padding:12px 0; }
@@ -353,7 +371,7 @@
   .edit-textarea{
     width:100%; min-width:280px; background:color-mix(in srgb, var(--accent) 16%, var(--panel));
     border:1px solid color-mix(in srgb, var(--accent) 40%, var(--border)); border-radius:var(--radius);
-    padding:12px 15px; color:var(--text); font-family:var(--font-body); font-size:14.5px;
+    padding:12px 15px; color:var(--text); font-family:var(--font-body); font-size:var(--msg-font-size, 14.5px);
     line-height:1.6; resize:none; outline:none;
   }
   .edit-actions{ display:flex; gap:8px; justify-content:flex-end; margin-top:8px; }
@@ -391,7 +409,7 @@
 
   .composer textarea{
     flex:1; background:none; border:none; outline:none; resize:none;
-    color:var(--text); font-family:var(--font-body); font-size:14.5px; line-height:1.5;
+    color:var(--text); font-family:var(--font-body); font-size:var(--msg-font-size, 14.5px); line-height:1.5;
     max-height:160px; padding:8px 4px;
   }
   .composer textarea::placeholder{ color:var(--text-dim); }
@@ -654,6 +672,11 @@
     </div>
 
     <div class="field">
+      <label>Text size</label>
+      <div class="model-options" id="fontSizeOptions"></div>
+    </div>
+
+    <div class="field">
       <label>Accent color</label>
       <div class="swatches" id="swatches"></div>
       <div class="custom-color-row">
@@ -693,7 +716,14 @@
     { value:'gemini-3.1-flash-lite', name:'Gemini 3.1 Flash Lite', sub:'Fastest and lightest, simpler tasks' }
   ];
 
-  const defaults = { model: MODELS[0].value, focus: '', accent: '#5b5fff', userName: '', voiceName: 'Kore', memoryClearedAt: 0 };
+  const FONT_SIZES = [
+    { value:'small', name:'Small', px:'13px' },
+    { value:'medium', name:'Medium', px:'14.5px' },
+    { value:'large', name:'Large', px:'16.5px' },
+    { value:'xlarge', name:'Extra large', px:'18.5px' }
+  ];
+
+  const defaults = { model: MODELS[0].value, focus: '', accent: '#5b5fff', userName: '', voiceName: 'Kore', memoryClearedAt: 0, fontSize: 'medium' };
 
   let settings = loadSettings();
   let conversations = loadConversations();
@@ -736,6 +766,7 @@
   const overlay = document.getElementById('overlay');
   const settingsPanel = document.getElementById('settingsPanel');
   const modelOptionsEl = document.getElementById('modelOptions');
+  const fontSizeOptionsEl = document.getElementById('fontSizeOptions');
   const focusInput = document.getElementById('focusInput');
   const userNameInput = document.getElementById('userNameInput');
   const voiceSelect = document.getElementById('voiceSelect');
@@ -795,6 +826,10 @@
   }
 
   function applyAccent(color){ document.documentElement.style.setProperty('--accent', color); }
+  function applyFontSize(size){
+    const match = FONT_SIZES.find(f => f.value === size) || FONT_SIZES[1];
+    document.documentElement.style.setProperty('--msg-font-size', match.px);
+  }
 
   // ---------- Conversation management ----------
   function getCurrentConv(){ return conversations.find(c => c.id === currentId); }
@@ -1217,6 +1252,21 @@
     });
   }
 
+  function renderFontSizeOptions(){
+    fontSizeOptionsEl.innerHTML = '';
+    FONT_SIZES.forEach(f => {
+      const el = document.createElement('div');
+      el.className = 'model-option' + (f.value === settings.fontSize ? ' active' : '');
+      el.innerHTML = '<div class="name" style="font-size:' + f.px + '">' + f.name + '</div>';
+      el.addEventListener('click', () => {
+        settings.fontSize = f.value;
+        applyFontSize(f.value);
+        renderFontSizeOptions();
+      });
+      fontSizeOptionsEl.appendChild(el);
+    });
+  }
+
   function renderSwatches(){
     swatchesEl.innerHTML = '';
     PRESET_COLORS.forEach(c => {
@@ -1238,6 +1288,7 @@
     userNameInput.value = settings.userName;
     customColor.value = settings.accent;
     renderModelOptions();
+    renderFontSizeOptions();
     renderSwatches();
     renderVoiceOptions();
     renderUsageStats();
@@ -1340,12 +1391,14 @@
     settings = Object.assign({}, defaults);
     persistSettings();
     applyAccent(settings.accent);
+    applyFontSize(settings.fontSize);
     modelBadge.textContent = settings.model;
     openSettingsPanel();
     saveStatus.textContent = 'Reset.';
   });
 
   applyAccent(settings.accent);
+  applyFontSize(settings.fontSize);
   modelBadge.textContent = settings.model;
 
   // ---------- Voice input (mic) ----------
